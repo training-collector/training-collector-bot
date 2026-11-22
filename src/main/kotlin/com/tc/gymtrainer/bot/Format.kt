@@ -16,11 +16,9 @@ import java.time.format.DateTimeFormatter
  */
 object Format {
     private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
-    private val dateTimeFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
 
     fun date(value: LocalDate): String = value.format(dateFmt)
     fun date(value: OffsetDateTime): String = value.format(dateFmt)
-    fun dateTime(value: OffsetDateTime): String = value.format(dateTimeFmt)
 
     /** Число без лишних нулей: 60.00 → «60», 62.50 → «62.5». */
     fun number(value: BigDecimal?): String? =

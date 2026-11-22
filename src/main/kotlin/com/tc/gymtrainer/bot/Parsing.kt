@@ -19,12 +19,6 @@ object Parsing {
         return s.toBigDecimalOrNull()
     }
 
-    fun intOrNull(raw: String): Int? {
-        val s = raw.trim()
-        if (s.isEmpty() || s == "-") return null
-        return s.toIntOrNull()
-    }
-
     /**
      * Дата: «дд.мм.гггг», «дд.мм» (текущий год), «сегодня», «вчера».
      * [today] задаётся снаружи для тестируемости.

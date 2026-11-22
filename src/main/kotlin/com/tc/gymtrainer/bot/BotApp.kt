@@ -22,18 +22,13 @@ suspend fun pollTrainingBot(token: String, platform: TrainingPlatform) = corouti
     job.join()
 }
 
-fun trainingBotToken(): String? {
-    val bot = ConfigFactory.load("bot").getConfig("app.bot")
-    val token = bot.getString("token").takeIf { it.isNotBlank() }
-    require(token == null || bot.getString("mode").trim().equals("POLLING", ignoreCase = true)) {
+fun main() {
+    val config = ConfigFactory.load("bot").getConfig("app")
+    val token = config.getString("bot.token").trim()
+    require(token.isNotEmpty()) { "Для запуска основного бота задайте BOT_TOKEN." }
+    require(config.getString("bot.mode").trim().equals("POLLING", ignoreCase = true)) {
         "Для Telegram-бота поддерживается BOT_MODE=POLLING."
     }
-    return token
-}
-
-fun main() {
-    val token = requireNotNull(trainingBotToken()) { "Для запуска основного бота задайте BOT_TOKEN." }
-    val config = ConfigFactory.load("bot").getConfig("app.platform")
-    val platform = TrainingPlatform(config.getString("url"), config.getString("key"))
+    val platform = TrainingPlatform(config.getString("platform.url"), config.getString("platform.key"))
     runBlocking { pollTrainingBot(token, platform) }
 }

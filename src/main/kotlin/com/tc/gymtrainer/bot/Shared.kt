@@ -47,6 +47,8 @@ internal suspend fun BehaviourContext.sendCard(chat: Chat, text: String, replyMa
 internal suspend fun BehaviourContext.runFlow(chat: Chat, dialog: Boolean = false, block: suspend () -> Unit) {
     try {
         block()
+    } catch (_: AccessRevoked) {
+        sendTextMessage(chat, "Доступ к боту закрыт.", replyMarkup = ReplyKeyboardRemove())
     } catch (_: FlowCancelled) {
         sendTextMessage(chat, "Отменено.", replyMarkup = trainingKeyboard)
     } catch (e: ServiceException) {
@@ -114,14 +116,14 @@ internal suspend fun BehaviourContext.sendListPage(
 }
 
 internal suspend fun BehaviourContext.chooseItem(
-    chat: Chat, userId: Long, title: String, items: List<Pair<String, String>>, extra: Pair<String, String>? = null,
+    chat: Chat, userId: Long, title: String, items: List<Pair<String, String>>,
 ): String {
     var page = 0
     while (true) {
-        val prompt = sendListPage(chat, title, items, listOfNotNull(extra), page, "Отмена" to "cancel") { "page:$it" }
+        val prompt = sendListPage(chat, title, items, emptyList(), page, "Отмена" to "cancel") { "page:$it" }
         val data = awaitCallbackData(userId, prompt.messageId)
         if (data.startsWith("page:")) page = data.substringAfter(':').toIntOrNull() ?: page
-        else if (data == extra?.second || items.any { it.second == data }) return data
+        else if (items.any { it.second == data }) return data
     }
 }
 

@@ -42,7 +42,7 @@ object Format {
         number(heightCm)?.let { appendLine("Рост: $it см") }
         p.telegramUsername?.let { appendLine("Telegram: @$it") }
         p.phone?.let { appendLine("Телефон: $it") }
-        p.goal?.let { appendLine("Цель: ${it.label}") }
+        p.goal?.let { appendLine("Цель: $it") }
         p.notes?.let { appendLine("Заметки: $it") }
     }.trimEnd()
 

@@ -3,7 +3,6 @@ package com.tc.gymtrainer.bot
 import com.tc.gymtrainer.bot.platform.validateProfile
 import com.tc.gymtrainer.bot.platform.ClientProfile
 import com.tc.gymtrainer.bot.platform.Client
-import com.tc.gymtrainer.bot.platform.Goal
 import com.tc.gymtrainer.bot.platform.Sex
 import com.tc.gymtrainer.bot.platform.ValidationException
 import com.tc.gymtrainer.bot.platform.ClientService
@@ -31,7 +30,7 @@ internal suspend fun BehaviourContext.addClient(
     val last = askName(chat, userId, "Фамилия подопечного", 254 - first.length)
     val initial = ClientProfile(first, last)
     val action = chooseReply(chat, userId, "${Format.profile(initial)}\nСохранить подопечного или заполнить дополнительные данные?", SAVE, "Редактировать")
-    val draft = if (action == SAVE) ProfileDraft(initial) else collectProfile(chat, userId, initial)
+    val draft = if (action == SAVE) ProfileDraft(initial) else collectProfile(chat, userId, initial, clients.goals(trainer.telegramUserId))
     val client = clients.create(trainer.telegramUserId, draft.profile, draft.measurement)
     val card = Format.clientCard(client, draft.measurement?.weightKg, draft.measurement?.heightCm)
     sendTextMessage(chat, "Подопечный добавлен.", replyMarkup = trainingKeyboard)
@@ -78,7 +77,7 @@ private enum class ProfileField(val label: String) {
         AGE -> profile.copy(age = value?.let { it.toIntOrNull() ?: throw ValidationException("Введите возраст целым числом.") })
         TELEGRAM -> profile.copy(telegramUsername = value)
         PHONE -> profile.copy(phone = value)
-        GOAL -> profile.copy(goal = value?.let { Goal.fromLabel(it) ?: throw ValidationException("Выберите цель кнопкой.") })
+        GOAL -> profile.copy(goal = value)
         NOTES -> profile.copy(notes = value)
     }
 }
@@ -89,12 +88,12 @@ private data class ProfileDraft(
 )
 
 private suspend fun BehaviourContext.collectProfile(
-    chat: Chat, userId: Long, initial: ClientProfile,
+    chat: Chat, userId: Long, initial: ClientProfile, goals: List<String>,
 ): ProfileDraft {
     var profile = initial
     var measurement = MeasurementInput(LocalDate.now())
     val metrics = listOf(Metric.WEIGHT, Metric.HEIGHT)
-    val menu = dialogKeyboard(*(metrics.map { it.label } + ProfileField.entries.map { it.label } + SAVE).toTypedArray())
+    val menu = dialogKeyboard(*(metrics.map { it.label } + ProfileField.entries.filter { it != ProfileField.GOAL || goals.isNotEmpty() }.map { it.label } + SAVE).toTypedArray())
     while (true) {
         val card = Format.profile(profile, measurement.weightKg, measurement.heightCm)
         sendCard(chat, "$card\n\nВыберите поле или нажмите «Сохранить».", replyMarkup = menu)
@@ -108,7 +107,7 @@ private suspend fun BehaviourContext.collectProfile(
         val field = ProfileField.entries.find { it.label == action } ?: continue
         val choices = when (field) {
             ProfileField.SEX -> Sex.entries.map { it.label }
-            ProfileField.GOAL -> Goal.available.map { it.label }
+            ProfileField.GOAL -> goals
             else -> emptyList()
         }
         val required = field == ProfileField.FIRST || field == ProfileField.LAST
@@ -128,7 +127,8 @@ private suspend fun BehaviourContext.collectProfile(
             }
             val value = if (raw == CLEAR) null else raw
             try {
-                profile = validateProfile(field.apply(profile, value), initial.goal)
+                if (field == ProfileField.GOAL && value != null && value !in goals) throw ValidationException("Выберите цель кнопкой.")
+                profile = validateProfile(field.apply(profile, value))
                 break
             } catch (e: ValidationException) {
                 sendTextMessage(chat, e.message.orEmpty())

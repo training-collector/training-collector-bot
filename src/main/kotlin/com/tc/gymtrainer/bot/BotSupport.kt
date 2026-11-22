@@ -12,9 +12,23 @@ import dev.inmo.tgbotapi.types.queries.callback.DataCallbackQuery
 import dev.inmo.tgbotapi.types.queries.callback.MessageDataCallbackQuery
 import dev.inmo.tgbotapi.types.MessageId
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.currentCoroutineContext
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 
 /** Пользователь прервал сценарий (ввёл «отмена»). */
 internal class FlowCancelled : RuntimeException()
+
+internal class AccessRevoked : RuntimeException()
+
+// A reply can arrive after an administrator has disabled or deleted the trainer.
+internal class DialogAccess(val active: suspend () -> Boolean) : AbstractCoroutineContextElement(Key) {
+    companion object Key : CoroutineContext.Key<DialogAccess>
+}
+
+private suspend fun checkDialogAccess() {
+    if (currentCoroutineContext()[DialogAccess]?.active?.invoke() == false) throw AccessRevoked()
+}
 
 /** Telegram user id из приватного чата (в личке id чата совпадает с id пользователя). */
 internal val CommonMessage<*>.userId: Long
@@ -35,6 +49,7 @@ internal suspend fun BehaviourContext.awaitText(userId: Long): String {
         val text = it.content.text
         it.privateSenderId == userId && TrainingAction.from(text) == null && text.substringBefore(' ').substringBefore('@') != "/start"
     }
+    checkDialogAccess()
     val text = msg.content.text.trim()
     if (text.equals("отмена", ignoreCase = true)) throw FlowCancelled()
     return text
@@ -49,6 +64,7 @@ internal suspend fun BehaviourContext.awaitCallbackData(userId: Long, prompt: Me
         it is MessageDataCallbackQuery && it.userId == userId && it.message.chat.id.chatId.long == userId && it.message.messageId == prompt
     }
     answerCallbackQuery(query)
+    checkDialogAccess()
     if (query.data == "cancel") throw FlowCancelled()
     return query.data
 }

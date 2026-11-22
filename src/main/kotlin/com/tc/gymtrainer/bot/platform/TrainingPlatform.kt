@@ -21,7 +21,9 @@ internal class TrainerService(private val http: PlatformHttp) {
         http.call<Trainer>("POST", "/connect", mapOf("token" to token, "sender" to sender))
 }
 
+internal data class GoalItem(val name: String)
 internal class ClientService(private val http: PlatformHttp) {
+    suspend fun goals(sender: Long) = http.call<List<GoalItem>>("GET", "/chats/$sender/catalog/goals").map { it.name }
     suspend fun create(sender: Long, profile: ClientProfile, measurement: MeasurementInput?) =
         http.call<Client>("POST", "/chats/$sender/clients/profile", mapOf("profile" to profile, "measurement" to measurement))
     suspend fun list(sender: Long, includeArchived: Boolean) =
@@ -32,8 +34,7 @@ internal class ClientService(private val http: PlatformHttp) {
 internal class CatalogService(private val http: PlatformHttp) {
     suspend fun exercisesFor(sender: Long) = http.call<List<ExerciseCatalogItem>>("GET", "/chats/$sender/catalog/exercises")
     suspend fun getExercise(sender: Long, id: Long) = http.call<ExerciseCatalogItem>("GET", "/chats/$sender/catalog/exercises/$id")
-    suspend fun addExercise(sender: Long, name: String, description: String? = null) =
-        http.call<ExerciseCatalogItem>("POST", "/chats/$sender/catalog/exercises", mapOf("name" to name, "description" to description))
+
 }
 
 internal data class LatestMeasurement(val value: BigDecimal, val measuredOn: LocalDate)

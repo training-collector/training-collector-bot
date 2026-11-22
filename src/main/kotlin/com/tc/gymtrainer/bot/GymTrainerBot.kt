@@ -16,6 +16,7 @@ import dev.inmo.tgbotapi.types.chat.PrivateChat
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.job
 import java.util.concurrent.ConcurrentHashMap
 
@@ -37,12 +38,18 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
         val dialogs = ConcurrentHashMap<Long, Job>()
         suspend fun BehaviourContext.trainerDialog(chat: Chat, sender: Long, action: suspend (Trainer) -> Unit) {
             runFlow(chat, dialog = true) {
-                val trainer = requireTrainer(chat, sender, trainerService) ?: return@runFlow
+                val trainer = requireTrainer(chat, sender, trainerService)
+                if (trainer == null) {
+                    dialogs.remove(sender)?.cancelAndJoin()
+                    return@runFlow
+                }
                 coroutineScope {
                     val current = coroutineContext.job
                     try {
                         dialogs.put(sender, current)?.cancelAndJoin()
-                        action(trainer)
+                        withContext(DialogAccess { trainerService.findByTelegramUserId(sender)?.id == trainer.id }) {
+                            action(trainer)
+                        }
                     } finally {
                         dialogs.remove(sender, current)
                     }
@@ -53,10 +60,10 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
         bc.onCommand("start", requireOnlyCommandInMessage = false) { message ->
             val sender = message.privateSenderId ?: return@onCommand
             runFlow(message.chat) {
+                dialogs.remove(sender)?.cancelAndJoin()
                 val token = message.commandArgument()
                 val trainer = if (token != null) platform.trainers.connectTrainingBot(token, sender)
                     else requireTrainer(message.chat, sender, trainerService) ?: return@runFlow
-                dialogs.remove(sender)?.cancelAndJoin()
                 val greeting = if (token != null) "Бот для тренировок подключён к профилю ${trainer.username ?: trainer.fullName}."
                     else "С возвращением, ${trainer.fullName}! Ваш логин: ${trainer.username ?: trainer.fullName}."
                 sendTextMessage(message.chat, "$greeting\n\nВыберите действие.", replyMarkup = trainingKeyboard)
@@ -68,7 +75,6 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
             trainerDialog(message.chat, sender) { trainer ->
                 when (action) {
                     TrainingAction.ADD_CLIENT -> addClient(message.chat, sender, trainer, clientService)
-                    TrainingAction.ADD_EXERCISE -> addCatalogItem(message.chat, sender, trainer.telegramUserId)
                     TrainingAction.EXERCISES -> showExercises(message.chat, trainer.telegramUserId, catalogService)
                     TrainingAction.CLIENTS -> showClients(message.chat, trainer, clientService)
                     TrainingAction.WORKOUT -> {
@@ -91,7 +97,7 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
         }
 
         val menuAction = Regex(
-            """(?:cl|ex):(?:add|page:\d+|view:[1-9]\d*)|w:(?:add|view|resume|finish):[1-9]\d*|w:hist:[1-9]\d*(?::\d+)?""" +
+            """cl:add|(?:cl|ex):(?:page:\d+|view:[1-9]\d*)|w:(?:add|view|resume|finish):[1-9]\d*|w:hist:[1-9]\d*(?::\d+)?""" +
                 """|m:(?:view:[1-9]\d*|add(?::[1-9]\d*)?|hist(?::[1-9]\d*(?::\d+)?)?|close)"""
         )
         bc.onMessageDataCallbackQuery(initialFilter = { menuAction.matches(it.data) }, markerFactory = null,
@@ -104,12 +110,6 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
         }
     }
 
-    private suspend fun BehaviourContext.addCatalogItem(chat: Chat, sender: Long, senderId: Long) {
-        val item = createCatalogExercise(chat, sender, senderId, catalogService)
-        sendTextMessage(chat, "«${item.name}» в вашем списке упражнений.", replyMarkup = trainingKeyboard)
-        showExercises(chat, senderId, catalogService)
-    }
-
     private suspend fun BehaviourContext.handleMenu(chat: Chat, sender: Long, trainer: Trainer, data: String) {
         val parts = data.split(':')
         val action = parts.take(2).joinToString(":")
@@ -120,7 +120,6 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
             "cl:add" -> addClient(chat, sender, trainer, clientService)
             "cl:view" -> showClientCard(chat, trainer.telegramUserId, clientService.getOwned(trainer.telegramUserId, id()), measurementService, workoutService)
             "ex:page" -> showExercises(chat, trainer.telegramUserId, catalogService, page(2))
-            "ex:add" -> addCatalogItem(chat, sender, trainer.telegramUserId)
             "ex:view" -> showCatalogExercise(chat, catalogService.getExercise(trainer.telegramUserId, id()))
             "w:add", "w:hist" -> {
                 val client = clientService.getOwned(trainer.telegramUserId, id())

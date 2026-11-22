@@ -5,6 +5,7 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 
 data class Trainer(
+    val id: Long,
     val telegramUserId: Long,
     val fullName: String,
     val username: String?,
@@ -15,7 +16,7 @@ data class Client(
     val trainerId: Long,
     val fullName: String,
     val phone: String?,
-    val goal: Goal?,
+    val goal: String?,
     val notes: String?,
     val status: ClientStatus,
     val createdAt: OffsetDateTime,
@@ -38,7 +39,7 @@ data class ClientProfile(
     val age: Int? = null,
     val telegramUsername: String? = null,
     val phone: String? = null,
-    val goal: Goal? = null,
+    val goal: String? = null,
     val notes: String? = null,
 ) {
     @get:com.fasterxml.jackson.annotation.JsonIgnore

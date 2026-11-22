@@ -13,7 +13,6 @@ internal enum class TrainingAction(val command: String, val label: String) {
     CLIENTS("clients", "Подопечные"),
     EXERCISES("exercises", "Упражнения"),
     ADD_CLIENT("add_client", "Добавить подопечного"),
-    ADD_EXERCISE("add_exercise", "Добавить упражнение"),
     MEASURE("measure", "Замеры"),
     HELP("help", "Помощь"),
     MENU("menu", "Главное меню"),
@@ -39,7 +38,7 @@ internal const val CLEAR = "Очистить поле"
 internal const val SAVE = "Сохранить"
 internal const val DONE = "Готово"
 internal const val FINISH_WORKOUT = "Завершить тренировку"
-internal val addExerciseButtonLabel = "➕ ${TrainingAction.ADD_EXERCISE.label}"
+internal const val addExerciseButtonLabel = "➕ Добавить упражнение"
 
 internal fun dialogKeyboard(vararg actions: String, exit: TrainingAction = TrainingAction.CANCEL, exitFirst: Boolean = false) = replyKeyboard(resizeKeyboard = true) {
     if (exitFirst) row { simpleButton(exit.label) }

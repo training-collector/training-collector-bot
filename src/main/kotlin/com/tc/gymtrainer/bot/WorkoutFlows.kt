@@ -108,11 +108,9 @@ private suspend fun BehaviourContext.selectCatalogExercise(
     chat: Chat, userId: Long, senderId: Long, catalog: CatalogService, heading: String = "",
 ): ExerciseCatalogItem {
     val items = catalog.exercisesFor(senderId)
-    val title = if (items.isEmpty()) "Список упражнений пока пуст." else "Мои упражнения · выберите упражнение"
-    val selection = chooseItem(chat, userId, heading + title, items.map { it.name to it.id.toString() },
-        extra = addExerciseButtonLabel to "ex:new")
-    return if (selection == "ex:new") createCatalogExercise(chat, userId, senderId, catalog)
-        else items.first { it.id.toString() == selection }
+    if (items.isEmpty()) throw ValidationException("Администратор ещё не опубликовал упражнения.")
+    val selection = chooseItem(chat, userId, heading + "Выберите упражнение", items.map { it.name to it.id.toString() })
+    return items.first { it.id.toString() == selection }
 }
 
 private suspend fun BehaviourContext.collectExercise(

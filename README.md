@@ -1,6 +1,6 @@
 # Бот тренировок
 
-Для локального запуска нужны JDK 25, работающий Training Collector Platform и собственный Telegram-бот от @BotFather. Скопируйте `.env.example` в `.env` и укажите:
+Для локального запуска нужны JDK 25, работающий бэкенд Training Collector и собственный Telegram-бот от @BotFather. Скопируйте `.env.example` в `.env` и укажите:
 
 - `BOT_TOKEN` — токен этого Telegram-бота.
 - `PLATFORM_URL` — адрес платформы, локально `http://127.0.0.1:8080`.

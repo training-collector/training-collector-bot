@@ -15,7 +15,6 @@ data class Client(
     val id: Long,
     val trainerId: Long,
     val fullName: String,
-    val phone: String?,
     val goal: String?,
     val notes: String?,
     val status: ClientStatus,
@@ -27,7 +26,7 @@ data class Client(
     val age: Int?,
     val telegramUsername: String?,
 ) {
-    fun profile() = ClientProfile(firstName, lastName, sex, age, telegramUsername, phone, goal, notes)
+    fun profile() = ClientProfile(firstName, lastName, sex, age, telegramUsername, goal, notes)
 }
 
 enum class Sex(val label: String) { MALE("Мужской"), FEMALE("Женский") }
@@ -38,7 +37,6 @@ data class ClientProfile(
     val sex: Sex? = null,
     val age: Int? = null,
     val telegramUsername: String? = null,
-    val phone: String? = null,
     val goal: String? = null,
     val notes: String? = null,
 ) {
@@ -46,9 +44,11 @@ data class ClientProfile(
     val fullName: String get() = listOfNotNull(firstName, lastName).joinToString(" ")
 }
 
+data class MuscleGroup(val id: Long, val name: String)
+
 data class ExerciseCatalogItem(
     val id: Long,
-    val muscleGroupId: Long?,
+    val muscleGroupId: Long,
     val name: String,
     val description: String? = null,
 )

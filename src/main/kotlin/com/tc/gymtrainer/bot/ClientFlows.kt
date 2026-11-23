@@ -67,7 +67,7 @@ private suspend fun BehaviourContext.askName(chat: Chat, userId: Long, prompt: S
 
 private enum class ProfileField(val label: String) {
     AGE("Возраст"), SEX("Пол"), GOAL("Цель"), NOTES("Заметки"), TELEGRAM("Ник Telegram"),
-    PHONE("Телефон"), FIRST("Имя"), LAST("Фамилия");
+    FIRST("Имя"), LAST("Фамилия");
 
     fun apply(profile: ClientProfile, value: String?): ClientProfile = when (this) {
         FIRST -> profile.copy(firstName = requireNotNull(value))
@@ -76,7 +76,6 @@ private enum class ProfileField(val label: String) {
             ?: throw ValidationException("Выберите пол кнопкой.") })
         AGE -> profile.copy(age = value?.let { it.toIntOrNull() ?: throw ValidationException("Введите возраст целым числом.") })
         TELEGRAM -> profile.copy(telegramUsername = value)
-        PHONE -> profile.copy(phone = value)
         GOAL -> profile.copy(goal = value)
         NOTES -> profile.copy(notes = value)
     }

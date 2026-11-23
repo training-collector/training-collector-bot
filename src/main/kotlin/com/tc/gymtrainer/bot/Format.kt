@@ -41,7 +41,6 @@ object Format {
         number(weightKg)?.let { appendLine("Вес: $it кг") }
         number(heightCm)?.let { appendLine("Рост: $it см") }
         p.telegramUsername?.let { appendLine("Telegram: @$it") }
-        p.phone?.let { appendLine("Телефон: $it") }
         p.goal?.let { appendLine("Цель: $it") }
         p.notes?.let { appendLine("Заметки: $it") }
     }.trimEnd()
@@ -56,7 +55,7 @@ object Format {
     fun workoutDetail(detail: WorkoutDetail): String = buildString {
         val s = detail.session
         appendLine("🗓 Тренировка ${date(s.performedAt)}")
-        s.durationMin?.let { appendLine("⏱ Длительность: $it мин") }
+        s.durationMin?.let { appendLine("🕒 Длительность: $it мин") }
         if (!s.note.isNullOrBlank()) appendLine("📝 ${s.note}")
         if (detail.exercises.isEmpty()) {
             appendLine()

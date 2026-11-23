@@ -106,7 +106,7 @@ internal suspend fun BehaviourContext.sendListPage(
         first.forEach { (label, data) -> row { dataButton(label, data) } }
         pages[page].forEach { (label, data) -> row { dataButton(label, data) } }
         if (pages.size > 1) row {
-            if (page > 0) dataButton("← Назад", pageData(page - 1))
+            if (page > 0) dataButton("$BACK_ICON Назад", pageData(page - 1))
             if (page < pages.lastIndex) dataButton("Дальше →", pageData(page + 1))
         }
         if (footer != null) row { dataButton(footer.first, footer.second) }
@@ -117,13 +117,14 @@ internal suspend fun BehaviourContext.sendListPage(
 
 internal suspend fun BehaviourContext.chooseItem(
     chat: Chat, userId: Long, title: String, items: List<Pair<String, String>>,
+    footer: Pair<String, String> = TrainingAction.CANCEL.label to "cancel",
 ): String {
     var page = 0
     while (true) {
-        val prompt = sendListPage(chat, title, items, emptyList(), page, "Отмена" to "cancel") { "page:$it" }
+        val prompt = sendListPage(chat, title, items, emptyList(), page, footer) { "page:$it" }
         val data = awaitCallbackData(userId, prompt.messageId)
         if (data.startsWith("page:")) page = data.substringAfter(':').toIntOrNull() ?: page
-        else if (items.any { it.second == data }) return data
+        else if (data == footer.second || items.any { it.second == data }) return data
     }
 }
 

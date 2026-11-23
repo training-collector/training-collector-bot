@@ -32,7 +32,11 @@ internal class ClientService(private val http: PlatformHttp) {
 }
 
 internal class CatalogService(private val http: PlatformHttp) {
-    suspend fun exercisesFor(sender: Long) = http.call<List<ExerciseCatalogItem>>("GET", "/chats/$sender/catalog/exercises")
+    suspend fun groups(sender: Long) = http.call<List<MuscleGroup>>("GET", "/chats/$sender/catalog/muscle-groups")
+    suspend fun exercisesFor(sender: Long, groupId: Long? = null): List<ExerciseCatalogItem> {
+        val path = if (groupId == null) "exercises" else "muscle-groups/$groupId/exercises"
+        return http.call("GET", "/chats/$sender/catalog/$path")
+    }
     suspend fun getExercise(sender: Long, id: Long) = http.call<ExerciseCatalogItem>("GET", "/chats/$sender/catalog/exercises/$id")
 
 }
@@ -57,6 +61,8 @@ internal class WorkoutService(private val http: PlatformHttp) {
         http.call<WorkoutSession?>("GET", "/chats/$sender/clients/$client/workouts/active")
     suspend fun startOrResume(sender: Long, client: Long) =
         http.call<WorkoutSession>("POST", "/chats/$sender/clients/$client/workouts/start")
+    suspend fun cancelActiveWorkout(sender: Long, client: Long, sessionId: Long) =
+        http.call<Boolean>("DELETE", "/chats/$sender/clients/$client/workouts/active/$sessionId")
     suspend fun history(sender: Long, client: Long) =
         http.call<List<WorkoutSession>>("GET", "/chats/$sender/clients/$client/workouts")
     suspend fun getDetail(sender: Long, id: Long) = http.call<WorkoutDetail>("GET", "/chats/$sender/workouts/$id")
@@ -68,7 +74,9 @@ internal class WorkoutService(private val http: PlatformHttp) {
     suspend fun undoActiveSet(sender: Long, id: Long, exercise: Long) = http.call<Unit>("POST", "/chats/$sender/workouts/$id/sets/$exercise/undo")
     suspend fun finishExercise(sender: Long, id: Long, exercise: Long) = http.call<Unit>("POST", "/chats/$sender/workouts/$id/sets/$exercise/finish")
     suspend fun chooseAnotherExercise(sender: Long, id: Long) = http.call<Unit>("POST", "/chats/$sender/workouts/$id/another")
-    suspend fun finishWorkout(sender: Long, id: Long) = http.call<WorkoutDetail>("POST", "/chats/$sender/workouts/$id/finish")
+    suspend fun finishWorkout(sender: Long, id: Long, durationMin: Int?) = http.call<WorkoutDetail>(
+        "POST", "/chats/$sender/workouts/$id/finish" + durationMin?.let { "?durationMin=$it" }.orEmpty(),
+    )
     suspend fun updateDate(sender: Long, id: Long, date: LocalDate) = http.call<Unit>("PUT", "/chats/$sender/workouts/$id/date", mapOf("date" to date))
     suspend fun updateDuration(sender: Long, id: Long, minutes: Int?) = http.call<Unit>("PUT", "/chats/$sender/workouts/$id/duration", mapOf("minutes" to minutes))
     suspend fun updateNote(sender: Long, id: Long, note: String?) = http.call<Unit>("PUT", "/chats/$sender/workouts/$id/note", mapOf("text" to note))

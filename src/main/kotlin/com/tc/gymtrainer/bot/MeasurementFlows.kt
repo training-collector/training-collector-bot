@@ -38,7 +38,7 @@ internal suspend fun BehaviourContext.showMeasurementHistory(
     }
     val title = if (history.isEmpty()) "${client.fullName} · замеров пока нет." else "История замеров · ${client.fullName}"
     sendListPage(chat, title, items, listOf("Добавить новый замер" to "m:add:${client.id}"), page,
-        "К подопечному" to "cl:view:${client.id}") { "m:hist:${client.id}:$it" }
+        BACK_TO_CLIENT to "cl:view:${client.id}") { "m:hist:${client.id}:$it" }
 }
 
 internal suspend fun BehaviourContext.showMeasurement(

@@ -61,7 +61,8 @@ internal suspend fun BehaviourContext.awaitText(userId: Long): String {
  */
 internal suspend fun BehaviourContext.awaitCallbackData(userId: Long, prompt: MessageId): String {
     val query = waitDataCallbackQuery().first {
-        it is MessageDataCallbackQuery && it.userId == userId && it.message.chat.id.chatId.long == userId && it.message.messageId == prompt
+        it is MessageDataCallbackQuery && it.userId == userId && it.message.chat.id.chatId.long == userId &&
+            it.message.messageId == prompt && !menuCallback.matches(it.data)
     }
     answerCallbackQuery(query)
     checkDialogAccess()

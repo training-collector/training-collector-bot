@@ -43,9 +43,8 @@ fun validateSet(set: SetDraft) {
 fun validateProfile(profile: ClientProfile): ClientProfile {
     val clean = profile.copy(firstName = profile.firstName.trim(), lastName = profile.lastName?.trim()?.ifEmpty { null },
         telegramUsername = profile.telegramUsername?.trim()?.ifEmpty { null }?.removePrefix("@"),
-        phone = profile.phone?.trim()?.ifEmpty { null }, notes = profile.notes?.trim()?.ifEmpty { null })
+        notes = profile.notes?.trim()?.ifEmpty { null })
     if (clean.firstName.isEmpty() || clean.fullName.length > 255) throw ValidationException("Имя и фамилия вместе должны занимать от 1 до 255 символов.")
-    if (clean.phone != null && clean.phone.length > 64) throw ValidationException("Телефон слишком длинный.")
     if (clean.age != null && clean.age !in 0..130) throw ValidationException("Введите возраст в полных годах от 0 до 130.")
     if (clean.telegramUsername != null && !clean.telegramUsername.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,31}"))) {
         throw ValidationException("Введите ник Telegram латиницей, например @username.")

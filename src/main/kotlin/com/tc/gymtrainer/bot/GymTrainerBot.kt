@@ -13,6 +13,9 @@ import dev.inmo.tgbotapi.extensions.behaviour_builder.triggers_handling.onMessag
 import dev.inmo.tgbotapi.extensions.api.answers.answerCallbackQuery
 import dev.inmo.tgbotapi.types.chat.Chat
 import dev.inmo.tgbotapi.types.chat.PrivateChat
+import dev.inmo.tgbotapi.types.buttons.InlineKeyboardButtons.CallbackDataInlineKeyboardButton
+import dev.inmo.tgbotapi.types.message.abstracts.PossiblyMarkedUp
+import dev.inmo.tgbotapi.types.queries.callback.MessageDataCallbackQuery
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
@@ -75,7 +78,7 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
             trainerDialog(message.chat, sender) { trainer ->
                 when (action) {
                     TrainingAction.ADD_CLIENT -> addClient(message.chat, sender, trainer, clientService)
-                    TrainingAction.EXERCISES -> showExercises(message.chat, trainer.telegramUserId, catalogService)
+                    TrainingAction.EXERCISES -> showExerciseGroups(message.chat, trainer.telegramUserId, catalogService)
                     TrainingAction.CLIENTS -> showClients(message.chat, trainer, clientService)
                     TrainingAction.WORKOUT -> {
                         val client = selectClient(message.chat, sender, trainer, clientService, "Для кого записываем тренировку?") ?: return@trainerDialog
@@ -96,42 +99,53 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
             }
         }
 
-        val menuAction = Regex(
-            """cl:add|(?:cl|ex):(?:page:\d+|view:[1-9]\d*)|w:(?:add|view|resume|finish):[1-9]\d*|w:hist:[1-9]\d*(?::\d+)?""" +
-                """|m:(?:view:[1-9]\d*|add(?::[1-9]\d*)?|hist(?::[1-9]\d*(?::\d+)?)?|close)"""
-        )
-        bc.onMessageDataCallbackQuery(initialFilter = { menuAction.matches(it.data) }, markerFactory = null,
+        bc.onMessageDataCallbackQuery(initialFilter = { menuCallback.matches(it.data) }, markerFactory = null,
             subcontextUpdatesFilter = null) { query ->
             val chat = query.message.chat
             val sender = query.userId
             if (chat !is PrivateChat || chat.id.chatId.long != sender) return@onMessageDataCallbackQuery
             answerCallbackQuery(query)
-            trainerDialog(chat, sender) { trainer -> handleMenu(chat, sender, trainer, query.data) }
+            trainerDialog(chat, sender) { trainer -> handleMenu(chat, sender, trainer, query.menuDestination()) }
         }
     }
 
     private suspend fun BehaviourContext.handleMenu(chat: Chat, sender: Long, trainer: Trainer, data: String) {
         val parts = data.split(':')
         val action = parts.take(2).joinToString(":")
-        fun id() = parts.getOrNull(2)?.toLongOrNull() ?: throw ValidationException("Некорректная запись.")
+        fun id(index: Int = 2) = parts.getOrNull(index)?.toLongOrNull() ?: throw ValidationException("Некорректная запись.")
         fun page(index: Int) = parts.getOrNull(index)?.toIntOrNull() ?: 0
         when (action) {
             "cl:page" -> showClients(chat, trainer, clientService, page(2))
             "cl:add" -> addClient(chat, sender, trainer, clientService)
             "cl:view" -> showClientCard(chat, trainer.telegramUserId, clientService.getOwned(trainer.telegramUserId, id()), measurementService, workoutService)
-            "ex:page" -> showExercises(chat, trainer.telegramUserId, catalogService, page(2))
+            "ex:page" -> showExerciseGroups(chat, trainer.telegramUserId, catalogService, page(2))
+            "ex:group" -> showGroupExercises(chat, trainer.telegramUserId, catalogService, id(), page(3))
             "ex:view" -> showCatalogExercise(chat, catalogService.getExercise(trainer.telegramUserId, id()))
             "w:add", "w:hist" -> {
                 val client = clientService.getOwned(trainer.telegramUserId, id())
-                if (action == "w:add") recordWorkout(chat, sender, trainer.telegramUserId, client, catalogService, workoutService)
-                else showWorkoutHistory(chat, trainer.telegramUserId, client, workoutService, page(3))
+                when {
+                    action == "w:add" -> recordWorkout(chat, sender, trainer.telegramUserId, client, catalogService, workoutService)
+                    parts.size == 3 -> showWorkoutMenu(chat, trainer.telegramUserId, client, workoutService)
+                    else -> showWorkoutHistory(chat, trainer.telegramUserId, client, workoutService, page(3))
+                }
             }
             "w:view" -> showCompletedWorkout(chat, sender, trainer.telegramUserId, id(), catalogService, workoutService)
+            "w:cancel", "w:discard" -> {
+                val client = clientService.getOwned(trainer.telegramUserId, id())
+                val sessionId = id(3)
+                if (action == "w:cancel") {
+                    confirmWorkoutCancellation(chat, trainer.telegramUserId, client, workoutService, sessionId)
+                } else {
+                    val removed = workoutService.cancelActiveWorkout(trainer.telegramUserId, client.id, sessionId)
+                    showWorkoutMenu(chat, trainer.telegramUserId, client, workoutService,
+                        notice = if (removed) "Тренировка отменена." else WORKOUT_NO_LONGER_ACTIVE)
+                }
+            }
             "w:resume", "w:finish" -> {
                 val session = workoutService.getSession(trainer.telegramUserId, id())
                 val client = clientService.getOwned(trainer.telegramUserId, session.clientId)
                 if (action == "w:finish" && session.stage != WorkoutStage.COMPLETED) {
-                    finishWorkout(chat, trainer.telegramUserId, client, workoutService, session.id)
+                    finishWorkout(chat, trainer.telegramUserId, client, workoutService, session.id, parts.getOrNull(3))
                 } else {
                     recordWorkout(chat, sender, trainer.telegramUserId, client, catalogService, workoutService, session.id)
                 }
@@ -147,5 +161,18 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
             "m:view" -> showMeasurement(chat, sender, trainer, id(), clientService, measurementService)
             "m:close" -> sendTextMessage(chat, "Главное меню", replyMarkup = trainingKeyboard)
         }
+    }
+}
+
+// Telegram keeps the original keyboard on messages sent before the workout menu changed.
+private fun MessageDataCallbackQuery.menuDestination(): String {
+    val keyboard = (message as? PossiblyMarkedUp)?.replyMarkup?.keyboard ?: return data
+    val buttons = keyboard.flatten().filterIsInstance<CallbackDataInlineKeyboardButton>()
+    val oldClose = buttons.firstOrNull { it.text == CLOSE_WORKOUT } ?: return data
+    return when {
+        oldClose.callbackData == data && data.startsWith("cl:view:") -> "w:hist:" + data.substringAfterLast(':')
+        oldClose.callbackData.startsWith("w:finish:") && (data == oldClose.callbackData || data.startsWith("w:resume:")) ->
+            buttons.firstOrNull { it.callbackData.startsWith("w:hist:") }?.callbackData ?: data
+        else -> data
     }
 }

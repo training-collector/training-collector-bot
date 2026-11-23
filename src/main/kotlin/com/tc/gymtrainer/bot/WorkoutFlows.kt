@@ -3,6 +3,7 @@ package com.tc.gymtrainer.bot
 import com.tc.gymtrainer.bot.platform.ExerciseDraft
 import com.tc.gymtrainer.bot.platform.SetDraft
 import com.tc.gymtrainer.bot.platform.WorkoutDetail
+import com.tc.gymtrainer.bot.platform.WorkoutSession
 import com.tc.gymtrainer.bot.platform.WorkoutStage
 import com.tc.gymtrainer.bot.platform.CatalogService
 import com.tc.gymtrainer.bot.platform.Client
@@ -38,7 +39,7 @@ internal suspend fun BehaviourContext.recordWorkout(
             when (detail.session.stage) {
                 WorkoutStage.CHOOSE_TEMPLATE -> workouts.skipLegacyTemplate(senderId, sessionId)
                 WorkoutStage.CHOOSE_EXERCISE -> {
-                    val item = selectCatalogExercise(chat, userId, senderId, catalog, "Идёт тренировка · ${client.fullName}\n")
+                    val item = selectCatalogExercise(chat, userId, senderId, catalog, client)
                     workouts.selectExercise(senderId, sessionId, item.id)
                 }
                 WorkoutStage.ENTER_SETS -> {
@@ -52,12 +53,9 @@ internal suspend fun BehaviourContext.recordWorkout(
                 }
                 WorkoutStage.REVIEW -> {
                     val summary = detail.exercises.joinToString("\n") { "${it.exercise.exerciseName} · подходов: ${it.sets.size}" }
-                    val more = "Ещё упражнение"
-                    val action = chooseReply(chat, userId, "$summary\nУпражнений в тренировке: ${detail.exercises.size}", more, FINISH_WORKOUT, exit = TrainingAction.MENU)
-                    if (action == FINISH_WORKOUT) {
-                        finishWorkout(chat, senderId, client, workouts, sessionId)
-                        return
-                    }
+                    val actions = listOf("Ещё упражнение" to "more") + finishAndCancelButtons(detail.session)
+                    chooseItem(chat, userId, "$summary\nУпражнений в тренировке: ${detail.exercises.size}",
+                        actions, BACK_TO_WORKOUTS to "w:hist:${client.id}")
                     workouts.chooseAnotherExercise(senderId, sessionId)
                 }
                 WorkoutStage.COMPLETED -> {
@@ -73,26 +71,101 @@ internal suspend fun BehaviourContext.recordWorkout(
 }
 
 internal suspend fun BehaviourContext.finishWorkout(
-    chat: Chat, senderId: Long, client: Client, workouts: WorkoutService, sessionId: Long,
+    chat: Chat, senderId: Long, client: Client, workouts: WorkoutService, sessionId: Long, choice: String?,
 ) {
-    val detail = workouts.finishWorkout(senderId, sessionId)
+    val minutes = when (choice) {
+        null, "duration", "custom" -> {
+            val prompt = when (choice) {
+                null -> "Длительность тренировки"
+                "duration" -> "Сколько минут?"
+                else -> "Введите продолжительность тренировки в минутах целым числом. Например, 75."
+            }
+            val keyboard = finishDurationKeyboard(sessionId, client.id, choice)
+            sendCard(chat, "${client.fullName}\n\n$prompt", replyMarkup = keyboard)
+            if (choice != "custom") return
+            var value = positiveMinutes(awaitText(senderId))
+            while (value == null) {
+                sendTextMessage(chat, "Введите положительное целое число минут, например 75.", replyMarkup = keyboard)
+                value = positiveMinutes(awaitText(senderId))
+            }
+            value
+        }
+        "skip" -> null
+        else -> positiveMinutes(choice) ?: throw ValidationException("Введите положительное целое число минут.")
+    }
+    val detail = workouts.finishWorkout(senderId, sessionId, minutes)
     sendTextMessage(chat, "Тренировка завершена.", replyMarkup = trainingKeyboard)
     sendCard(chat, "${client.fullName}\n\n${Format.workoutDetail(detail)}",
         replyMarkup = clientActionsKeyboard(client.id))
+}
+
+private fun positiveMinutes(text: String): Int? = text.toIntOrNull()?.takeIf { it > 0 }
+
+private fun finishDurationKeyboard(sessionId: Long, clientId: Long, choice: String?) = inlineKeyboard {
+    val finish = "w:finish:$sessionId"
+    if (choice == null) row { dataButton("Указать время", "$finish:duration") }
+    if (choice == "duration") {
+        listOf(30, 45, 50, 60, 90).chunked(3).forEach { options ->
+            row { options.forEach { minutes -> dataButton("$minutes мин", "$finish:$minutes") } }
+        }
+        row { dataButton("Свой вариант", "$finish:custom") }
+    }
+    row { dataButton("Завершить сразу", "$finish:skip") }
+    row {
+        when (choice) {
+            null -> dataButton(BACK_TO_WORKOUTS, "w:hist:$clientId")
+            "duration" -> dataButton("$BACK_ICON К завершению", finish)
+            else -> dataButton("$BACK_ICON К выбору длительности", "$finish:duration")
+        }
+    }
+}
+
+private fun finishAndCancelButtons(session: WorkoutSession) = listOf(
+    FINISH_WORKOUT to "w:finish:${session.id}",
+    "Отменить тренировку" to "w:cancel:${session.clientId}:${session.id}",
+)
+
+internal const val WORKOUT_NO_LONGER_ACTIVE = "Эта тренировка уже не активна."
+
+internal suspend fun BehaviourContext.confirmWorkoutCancellation(
+    chat: Chat, senderId: Long, client: Client, workouts: WorkoutService, sessionId: Long,
+) {
+    val active = workouts.activeForClient(senderId, client.id)
+    if (active?.id != sessionId) {
+        showWorkoutMenu(chat, senderId, client, workouts, notice = WORKOUT_NO_LONGER_ACTIVE)
+        return
+    }
+    sendCard(chat, "${client.fullName} · ${Format.date(active.performedAt)}\n\nОтменить тренировку? Запись и все её подходы будут удалены.",
+        replyMarkup = inlineKeyboard {
+            row { dataButton("$BACK_ICON Оставить тренировку", "w:hist:${client.id}") }
+            row { dataButton("Да, отменить", "w:discard:${client.id}:$sessionId") }
+        })
+}
+
+internal suspend fun BehaviourContext.showWorkoutMenu(
+    chat: Chat, senderId: Long, client: Client, workouts: WorkoutService, notice: String? = null,
+) {
+    val active = workouts.activeForClient(senderId, client.id)
+    val title = listOfNotNull("Тренировки · ${client.fullName}", notice).joinToString("\n\n")
+    sendCard(chat, title, replyMarkup = inlineKeyboard {
+        if (active == null) {
+            row { dataButton(TrainingAction.WORKOUT.label, "w:add:${client.id}") }
+        } else {
+            row { dataButton(RESUME_WORKOUT, "w:resume:${active.id}") }
+            finishAndCancelButtons(active).forEach { (label, data) -> row { dataButton(label, data) } }
+        }
+        row { dataButton(PAST_WORKOUTS, "w:hist:${client.id}:0") }
+        row { dataButton(BACK_TO_CLIENT, "cl:view:${client.id}") }
+    })
 }
 
 internal suspend fun BehaviourContext.showWorkoutHistory(
     chat: Chat, senderId: Long, client: Client, workouts: WorkoutService, page: Int = 0,
 ) {
     val sessions = workouts.history(senderId, client.id)
-    val active = workouts.activeForClient(senderId, client.id)
-    val actions = if (active == null) listOf(TrainingAction.WORKOUT.label to "w:add:${client.id}") else listOf(
-        "Продолжить тренировку" to "w:resume:${active.id}",
-        FINISH_WORKOUT to "w:finish:${active.id}",
-    )
-    val title = "Тренировки · ${client.fullName}" + if (sessions.isEmpty()) "\n\nЗавершённых тренировок пока нет." else ""
-    sendListPage(chat, title, sessions.map { Format.sessionLine(it) to "w:view:${it.id}" }, actions, page,
-        "К подопечному" to "cl:view:${client.id}") { "w:hist:${client.id}:$it" }
+    val title = "$PAST_WORKOUTS · ${client.fullName}" + if (sessions.isEmpty()) "\n\nЗавершённых тренировок пока нет." else ""
+    sendListPage(chat, title, sessions.map { Format.sessionLine(it) to "w:view:${it.id}" }, emptyList(), page,
+        BACK_TO_WORKOUTS to "w:hist:${client.id}") { "w:hist:${client.id}:$it" }
 }
 
 internal suspend fun BehaviourContext.showCompletedWorkout(
@@ -101,16 +174,27 @@ internal suspend fun BehaviourContext.showCompletedWorkout(
     val detail = workouts.getDetail(senderId, sessionId)
     if (detail.session.stage != WorkoutStage.COMPLETED) throw ValidationException("Тренировка ещё идёт. Откройте её в разделе «Тренировки».")
     sendCard(chat, Format.workoutDetail(detail))
-    editWorkout(chat, userId, senderId, sessionId, catalog, workouts)
+    editWorkout(chat, userId, senderId, detail.session, catalog, workouts)
 }
 
 private suspend fun BehaviourContext.selectCatalogExercise(
-    chat: Chat, userId: Long, senderId: Long, catalog: CatalogService, heading: String = "",
+    chat: Chat, userId: Long, senderId: Long, catalog: CatalogService, client: Client? = null,
 ): ExerciseCatalogItem {
     val items = catalog.exercisesFor(senderId)
-    if (items.isEmpty()) throw ValidationException("Администратор ещё не опубликовал упражнения.")
-    val selection = chooseItem(chat, userId, heading + "Выберите упражнение", items.map { it.name to it.id.toString() })
-    return items.first { it.id.toString() == selection }
+    val byGroup = items.groupBy { it.muscleGroupId }
+    val groups = catalog.groups(senderId).filter { it.id in byGroup }
+    val groupChoices = groups.map { it.name to it.id.toString() }
+    val title = if (groups.isEmpty()) "Администратор ещё не опубликовал упражнения." else "Выберите группу мышц"
+    if (groups.isEmpty() && client == null) throw ValidationException(title)
+    val prompt = if (client == null) title else "Идёт тренировка · ${client.fullName}\n$title\n\n«$CLOSE_WORKOUT» вернёт в раздел «Тренировки»."
+    val footer = if (client == null) TrainingAction.CANCEL.label to "cancel" else "$BACK_ICON $CLOSE_WORKOUT" to "w:hist:${client.id}"
+    while (true) {
+        val groupId = chooseItem(chat, userId, prompt, groupChoices, footer).toLong()
+        val choices = byGroup.getValue(groupId)
+        val selection = chooseItem(chat, userId, "Выберите упражнение · ${groups.first { it.id == groupId }.name}",
+            choices.map { it.name to it.id.toString() }, BACK_TO_CATEGORIES to "groups")
+        if (selection != "groups") return choices.first { it.id.toString() == selection }
+    }
 }
 
 private suspend fun BehaviourContext.collectExercise(
@@ -174,20 +258,22 @@ private suspend fun BehaviourContext.editWorkout(
     chat: Chat,
     userId: Long,
     senderId: Long,
-    sessionId: Long,
+    session: WorkoutSession,
     catalog: CatalogService,
     workouts: WorkoutService,
 ) {
+    val sessionId = session.id
     while (true) {
         val keyboard = inlineKeyboard {
             row { dataButton("✏️ Изменить подход", "w:sets") }
             row { dataButton(addExerciseButtonLabel, "w:addex") }
             row { dataButton("🗑 Удалить упражнение", "w:delex") }
             row { dataButton("📅 Дата", "w:date") }
-            row { dataButton("⏱ Длительность", "w:duration") }
+            row { dataButton("🕒 Длительность", "w:duration") }
             row { dataButton("📝 Заметки", "w:note") }
             row { dataButton("🗑 Удалить тренировку", "w:del") }
             row { dataButton("✅ Готово", "w:done") }
+            row { dataButton("$BACK_ICON К прошедшим тренировкам", "w:hist:${session.clientId}:0") }
         }
         val editPrompt = sendTextMessage(chat, "Что изменить?", replyMarkup = keyboard)
         when (awaitCallbackData(userId, editPrompt.messageId)) {
@@ -202,7 +288,7 @@ private suspend fun BehaviourContext.editWorkout(
             "w:duration" -> {
                 val current = workouts.getSession(senderId, sessionId).durationMin
                 editSessionField(chat, userId, "Длительность тренировки · ${current?.let { "$it мин" } ?: "не указана"}\nВведите число минут.", CLEAR) { raw ->
-                    val minutes = if (raw == CLEAR || raw == "-") null else raw.toIntOrNull()?.takeIf { it > 0 }
+                    val minutes = if (raw == CLEAR || raw == "-") null else positiveMinutes(raw)
                         ?: throw ValidationException("Введите положительное целое число минут.")
                     workouts.updateDuration(senderId, sessionId, minutes)
                 }

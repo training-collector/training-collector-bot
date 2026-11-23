@@ -13,6 +13,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import java.io.IOException
+import com.tc.gymtrainer.bot.DialogTurn
+import kotlinx.coroutines.currentCoroutineContext
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -33,22 +35,33 @@ internal class PlatformHttp(url: String, private val key: String) {
     init { require(key.isNotBlank()) { "Missing platform service key" } }
 
     suspend inline fun <reified T> call(method: String, path: String, body: Any? = null): T {
-        val data = body?.let { HttpRequest.BodyPublishers.ofString(json.writeValueAsString(it)) }
-        val request = HttpRequest.newBuilder(URI.create(base + path))
-            .timeout(Duration.ofSeconds(20)).header("Authorization", "Bearer $key")
-            .method(method, data ?: HttpRequest.BodyPublishers.noBody())
-        if (data != null) request.header("Content-Type", "application/json")
-        val response = http.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString()).await()
-        val status = response.statusCode()
+        val payload = body?.let { json.writeValueAsString(it) }
+        val turn = currentCoroutineContext()[DialogTurn]
+        val raw = if (turn == null || path.startsWith("/updates/")) exchange(method, path, payload, null) else {
+            val signature = java.util.UUID.nameUUIDFromBytes("$method $path $payload".toByteArray()).toString()
+            turn.effect(signature) { key -> exchange(method, path, payload, key.toString()) }
+        }
+        val status = raw.substringBefore(' ').toInt()
+        val responseBody = raw.substringAfter(' ')
         if (status !in 200..299) {
-            val error = runCatching { json.readTree(response.body()).path("error").textValue() }.getOrNull()
+            val error = runCatching { json.readTree(responseBody).path("error").textValue() }.getOrNull()
             if (status == 400) throw ValidationException(error ?: "Некорректный запрос.")
-            if (status >= 500) throw IOException("Platform HTTP $status")
             throw ServiceException(error ?: "Доступ к платформе отклонён (HTTP $status).")
         }
         @Suppress("UNCHECKED_CAST")
         if (T::class == Unit::class) return Unit as T
-        return json.readValue<T>(response.body().ifBlank { "null" })
+        return json.readValue<T>(responseBody.ifBlank { "null" })
+    }
+
+    private suspend fun exchange(method: String, path: String, payload: String?, keyId: String?): String {
+        val request = HttpRequest.newBuilder(URI.create(base + path))
+            .timeout(Duration.ofSeconds(25)).header("Authorization", "Bearer $key")
+            .method(method, payload?.let { HttpRequest.BodyPublishers.ofString(it) } ?: HttpRequest.BodyPublishers.noBody())
+        if (payload != null) request.header("Content-Type", "application/json")
+        if (keyId != null && method != "GET") request.header("Idempotency-Key", keyId)
+        val response = http.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString()).await()
+        if (response.statusCode() >= 500) throw IOException("Platform HTTP ${response.statusCode()}")
+        return "${response.statusCode()} ${response.body()}"
     }
 
     suspend fun keepRegistered(scope: CoroutineScope, username: String) {

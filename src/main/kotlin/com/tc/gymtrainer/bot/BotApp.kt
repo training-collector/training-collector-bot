@@ -26,9 +26,16 @@ fun main() {
     val config = ConfigFactory.load("bot").getConfig("app")
     val token = config.getString("bot.token").trim()
     require(token.isNotEmpty()) { "Для запуска основного бота задайте BOT_TOKEN." }
-    require(config.getString("bot.mode").trim().equals("POLLING", ignoreCase = true)) {
-        "Для Telegram-бота поддерживается BOT_MODE=POLLING."
-    }
     val platform = TrainingPlatform(config.getString("platform.url"), config.getString("platform.key"))
-    runBlocking { pollTrainingBot(token, platform) }
+    when (config.getString("bot.mode").trim().uppercase()) {
+        "POLLING" -> runBlocking { pollTrainingBot(token, platform) }
+        "WEBHOOK" -> {
+            val telegram = dev.inmo.tgbotapi.bot.ktor.telegramBot(token)
+            val username = requireNotNull(System.getenv("BOT_USERNAME")) { "Set BOT_USERNAME" }.removePrefix("@")
+            val handler = TrainingWebhook(platform, telegram, username)
+            webhookServer((System.getenv("PORT") ?: "8080").toInt(),
+                System.getenv("TELEGRAM_WEBHOOK_SECRET").orEmpty(), handler::process).start()
+        }
+        else -> error("BOT_MODE must be POLLING or WEBHOOK")
+    }
 }

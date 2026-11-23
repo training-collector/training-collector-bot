@@ -5,7 +5,7 @@ import java.math.BigDecimal
 import java.time.LocalDate
 
 class TrainingPlatform(url: String, key: String) {
-    private val http = PlatformHttp(url, key)
+    internal val http = PlatformHttp(url, key)
     internal val trainers = TrainerService(http)
     internal val clients = ClientService(http)
     internal val catalog = CatalogService(http)

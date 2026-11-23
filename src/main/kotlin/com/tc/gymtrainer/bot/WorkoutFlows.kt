@@ -10,7 +10,6 @@ import com.tc.gymtrainer.bot.platform.Client
 import com.tc.gymtrainer.bot.platform.ExerciseCatalogItem
 import com.tc.gymtrainer.bot.platform.ValidationException
 import com.tc.gymtrainer.bot.platform.WorkoutService
-import dev.inmo.tgbotapi.extensions.api.send.sendTextMessage
 import dev.inmo.tgbotapi.extensions.behaviour_builder.BehaviourContext
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.dataButton
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.inlineKeyboard
@@ -18,7 +17,6 @@ import dev.inmo.tgbotapi.types.message.textsources.boldTextSource
 import dev.inmo.tgbotapi.types.message.textsources.regularTextSource
 import dev.inmo.tgbotapi.types.chat.Chat
 import dev.inmo.tgbotapi.utils.row
-import java.time.LocalDate
 
 /**
  * Запись подходов, история и редактирование тренировок подопечного.
@@ -66,7 +64,7 @@ internal suspend fun BehaviourContext.recordWorkout(
             }
         }
     } catch (_: FlowCancelled) {
-        sendTextMessage(chat, "Тренировка сохранена. Продолжить её можно в разделе «Тренировки» подопечного.", replyMarkup = trainingKeyboard)
+        sendDialogText(chat, "Тренировка сохранена. Продолжить её можно в разделе «Тренировки» подопечного.", replyMarkup = trainingKeyboard)
     }
 }
 
@@ -85,7 +83,7 @@ internal suspend fun BehaviourContext.finishWorkout(
             if (choice != "custom") return
             var value = positiveMinutes(awaitText(senderId))
             while (value == null) {
-                sendTextMessage(chat, "Введите положительное целое число минут, например 75.", replyMarkup = keyboard)
+                sendDialogText(chat, "Введите положительное целое число минут, например 75.", replyMarkup = keyboard)
                 value = positiveMinutes(awaitText(senderId))
             }
             value
@@ -94,7 +92,7 @@ internal suspend fun BehaviourContext.finishWorkout(
         else -> positiveMinutes(choice) ?: throw ValidationException("Введите положительное целое число минут.")
     }
     val detail = workouts.finishWorkout(senderId, sessionId, minutes)
-    sendTextMessage(chat, "Тренировка завершена.", replyMarkup = trainingKeyboard)
+    sendDialogText(chat, "Тренировка завершена.", replyMarkup = trainingKeyboard)
     sendCard(chat, "${client.fullName}\n\n${Format.workoutDetail(detail)}",
         replyMarkup = clientActionsKeyboard(client.id))
 }
@@ -219,12 +217,12 @@ private suspend fun BehaviourContext.collectSets(
     }.orEmpty()
     val prompt = listOf(boldTextSource(name), regularTextSource("\n\n${saved}Введите подходы, каждый с новой строки.\n\n")) +
         setExamples + regularTextSource("\n\nПосле последнего подхода нажмите «Готово».")
-    sendTextMessage(chat, entities = prompt, replyMarkup = keyboard())
+    sendDialogText(chat, entities = prompt, replyMarkup = keyboard())
     while (true) {
         val raw = awaitText(userId)
         if (raw.equals(DONE, ignoreCase = true)) {
             if (sets.isNotEmpty()) return sets
-            sendTextMessage(chat, "Сначала введите хотя бы один подход, например «60 10».")
+            sendDialogText(chat, "Сначала введите хотя бы один подход, например «60 10».")
             continue
         }
         if (raw == UNDO_SET) {
@@ -236,7 +234,7 @@ private suspend fun BehaviourContext.collectSets(
             val invalid = parsed.indexOfFirst { it == null }
             if (lines.isEmpty() || invalid >= 0) {
                 val lineNumber = if (invalid >= 0) lines[invalid].index + 1 else 1
-                sendTextMessage(chat, entities = listOf(regularTextSource("Проверьте строку $lineNumber. Исправьте и отправьте сообщение целиком.\n\n")) + setExamples)
+                sendDialogText(chat, entities = listOf(regularTextSource("Проверьте строку $lineNumber. Исправьте и отправьте сообщение целиком.\n\n")) + setExamples)
                 continue
             }
             val batch = parsed.filterNotNull()
@@ -247,7 +245,7 @@ private suspend fun BehaviourContext.collectSets(
             Format.setLine(sets.size, it.weightKg, it.reps, it.restSec, it.rpe, it.durationSec)
         }
         val count = "Подходов в упражнении: ${sets.size}."
-        sendTextMessage(chat, if (last == null) count else "$count\nПоследний $last", replyMarkup = keyboard())
+        sendDialogText(chat, if (last == null) count else "$count\nПоследний $last", replyMarkup = keyboard())
     }
 }
 
@@ -275,13 +273,13 @@ private suspend fun BehaviourContext.editWorkout(
             row { dataButton("✅ Готово", "w:done") }
             row { dataButton("$BACK_ICON К прошедшим тренировкам", "w:hist:${session.clientId}:0") }
         }
-        val editPrompt = sendTextMessage(chat, "Что изменить?", replyMarkup = keyboard)
-        when (awaitCallbackData(userId, editPrompt.messageId)) {
+        val editPrompt = sendDialogText(chat, "Что изменить?", replyMarkup = keyboard)
+        when (awaitCallbackData(userId, editPrompt)) {
             "w:sets" -> editSet(chat, userId, senderId, sessionId, workouts)
             "w:date" -> {
                 val current = workouts.getSession(senderId, sessionId).performedAt
                 editSessionField(chat, userId, "Дата тренировки · ${Format.date(current)}\nВведите дату в формате ДД.ММ.ГГГГ.", "Сегодня", "Вчера") { raw ->
-                    val date = Parsing.dateOrNull(raw, LocalDate.now()) ?: throw ValidationException("Введите существующую дату в формате ДД.ММ.ГГГГ.")
+                    val date = Parsing.dateOrNull(raw, dialogToday()) ?: throw ValidationException("Введите существующую дату в формате ДД.ММ.ГГГГ.")
                     workouts.updateDate(senderId, sessionId, date)
                 }
             }
@@ -304,24 +302,24 @@ private suspend fun BehaviourContext.editWorkout(
                 val exercise = collectExercise(chat, userId, senderId, catalog)
                 chooseReply(chat, userId, "${exercise.exerciseName} · подходов: ${exercise.sets.size}", "Сохранить упражнение")
                 workouts.addExercise(senderId, sessionId, exercise)
-                sendTextMessage(chat, "Добавлено: ${exercise.exerciseName}.", replyMarkup = dialogKeyboard())
+                sendDialogText(chat, "Добавлено: ${exercise.exerciseName}.", replyMarkup = dialogKeyboard())
             }
             "w:delex" -> {
                 val detail = workouts.getDetail(senderId, sessionId)
                 val ex = chooseWorkoutExercise(chat, userId, detail) ?: continue
                 chooseReply(chat, userId, "Удалить упражнение вместе с его подходами?", "Удалить упражнение")
                 workouts.deleteExercise(senderId, ex)
-                sendTextMessage(chat, "Упражнение удалено.", replyMarkup = dialogKeyboard())
+                sendDialogText(chat, "Упражнение удалено.", replyMarkup = dialogKeyboard())
             }
             "w:del" -> {
-                val deletePrompt = sendTextMessage(
+                val deletePrompt = sendDialogText(
                     chat,
                     "Удалить тренировку целиком?",
                     replyMarkup = yesNoKeyboard("wdel:yes", "wdel:no", yesLabel = "Да, удалить", noLabel = "Нет"),
                 )
-                if (awaitCallbackData(userId, deletePrompt.messageId) == "wdel:yes") {
+                if (awaitCallbackData(userId, deletePrompt) == "wdel:yes") {
                     workouts.deleteSession(senderId, sessionId)
-                    sendTextMessage(chat, "🗑 Тренировка удалена.", replyMarkup = trainingKeyboard)
+                    sendDialogText(chat, "🗑 Тренировка удалена.", replyMarkup = trainingKeyboard)
                     return
                 }
             }
@@ -345,16 +343,16 @@ private suspend fun BehaviourContext.editSessionField(
     while (true) {
         val raw = awaitText(userId)
         if (raw == keep || raw == "=") {
-            sendTextMessage(chat, "Текущее значение сохранено.", replyMarkup = dialogKeyboard())
+            sendDialogText(chat, "Текущее значение сохранено.", replyMarkup = dialogKeyboard())
             return
         }
         try {
             save(raw)
         } catch (e: ValidationException) {
-            sendTextMessage(chat, e.message.orEmpty())
+            sendDialogText(chat, e.message.orEmpty())
             continue
         }
-        sendTextMessage(chat, "✅ Тренировка обновлена.", replyMarkup = dialogKeyboard())
+        sendDialogText(chat, "✅ Тренировка обновлена.", replyMarkup = dialogKeyboard())
         return
     }
 }
@@ -370,7 +368,7 @@ private suspend fun BehaviourContext.editSet(
     val detail = workouts.getDetail(senderId, sessionId)
     val flatSets = detail.exercises.flatMap { ews -> ews.sets.map { ews.exercise to it } }
     if (flatSets.isEmpty()) {
-        sendTextMessage(chat, "В тренировке пока нет подходов.")
+        sendDialogText(chat, "В тренировке пока нет подходов.")
         return
     }
     val setId = chooseItem(chat, userId, "Какой подход изменить?", flatSets.map { (ex, set) ->
@@ -378,14 +376,14 @@ private suspend fun BehaviourContext.editSet(
         label.take(64) to set.id.toString()
     }).toLong()
 
-    sendTextMessage(chat, entities = listOf(regularTextSource("Введите новый результат подхода.\n\n")) + setExamples, replyMarkup = dialogKeyboard())
+    sendDialogText(chat, entities = listOf(regularTextSource("Введите новый результат подхода.\n\n")) + setExamples, replyMarkup = dialogKeyboard())
     var parsed = Parsing.setOrNull(awaitText(userId))
     while (parsed == null) {
-        sendTextMessage(chat, entities = listOf(regularTextSource("Введите один подход.\n\n")) + setExamples)
+        sendDialogText(chat, entities = listOf(regularTextSource("Введите один подход.\n\n")) + setExamples)
         parsed = Parsing.setOrNull(awaitText(userId))
     }
     workouts.updateSet(senderId, setId, parsed)
-    sendTextMessage(chat, "✅ Подход обновлён.")
+    sendDialogText(chat, "✅ Подход обновлён.")
 }
 
 /** Выбор упражнения тренировки, возвращает его id. */
@@ -395,7 +393,7 @@ private suspend fun BehaviourContext.chooseWorkoutExercise(
     detail: WorkoutDetail,
 ): Long? {
     if (detail.exercises.isEmpty()) {
-        sendTextMessage(chat, "В тренировке нет упражнений.")
+        sendDialogText(chat, "В тренировке нет упражнений.")
         return null
     }
     return chooseItem(chat, userId, "Выберите упражнение.",

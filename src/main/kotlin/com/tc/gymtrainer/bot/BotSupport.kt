@@ -45,6 +45,7 @@ internal val DataCallbackQuery.userId: Long
  * прерывают сценарий ([FlowCancelled]).
  */
 internal suspend fun BehaviourContext.awaitText(userId: Long): String {
+    currentCoroutineContext()[DialogTurn]?.let { return it.input(null) }
     val msg = waitTextMessage().first {
         val text = it.content.text
         it.privateSenderId == userId && TrainingAction.from(text) == null && text.substringBefore(' ').substringBefore('@') != "/start"
@@ -60,6 +61,7 @@ internal suspend fun BehaviourContext.awaitText(userId: Long): String {
  * и возвращает callback data.
  */
 internal suspend fun BehaviourContext.awaitCallbackData(userId: Long, prompt: MessageId): String {
+    currentCoroutineContext()[DialogTurn]?.let { return it.input(prompt.long) }
     val query = waitDataCallbackQuery().first {
         it is MessageDataCallbackQuery && it.userId == userId && it.message.chat.id.chatId.long == userId &&
             it.message.messageId == prompt && !menuCallback.matches(it.data)

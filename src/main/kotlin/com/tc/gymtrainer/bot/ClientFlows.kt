@@ -11,13 +11,11 @@ import com.tc.gymtrainer.bot.platform.MeasurementService
 import com.tc.gymtrainer.bot.platform.WorkoutService
 import com.tc.gymtrainer.bot.platform.validateMeasurement
 import com.tc.gymtrainer.bot.platform.Trainer
-import dev.inmo.tgbotapi.extensions.api.send.sendTextMessage
 import dev.inmo.tgbotapi.extensions.behaviour_builder.BehaviourContext
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.dataButton
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.inlineKeyboard
 import dev.inmo.tgbotapi.types.chat.Chat
 import dev.inmo.tgbotapi.utils.row
-import java.time.LocalDate
 
 /** Создание подопечного и открытие его журнала. */
 internal suspend fun BehaviourContext.addClient(
@@ -33,7 +31,7 @@ internal suspend fun BehaviourContext.addClient(
     val draft = if (action == SAVE) ProfileDraft(initial) else collectProfile(chat, userId, initial, clients.goals(trainer.telegramUserId))
     val client = clients.create(trainer.telegramUserId, draft.profile, draft.measurement)
     val card = Format.clientCard(client, draft.measurement?.weightKg, draft.measurement?.heightCm)
-    sendTextMessage(chat, "Подопечный добавлен.", replyMarkup = trainingKeyboard)
+    sendDialogText(chat, "Подопечный добавлен.", replyMarkup = trainingKeyboard)
     sendCard(chat, card, replyMarkup = clientActionsKeyboard(client.id))
 }
 
@@ -57,11 +55,11 @@ internal suspend fun BehaviourContext.showClientCard(
 }
 
 private suspend fun BehaviourContext.askName(chat: Chat, userId: Long, prompt: String, maxLength: Int): String {
-    sendTextMessage(chat, prompt, replyMarkup = dialogKeyboard())
+    sendDialogText(chat, prompt, replyMarkup = dialogKeyboard())
     while (true) {
         val name = awaitText(userId)
         if (name !in listOf("-", SKIP, CLEAR) && name.length in 1..maxLength) return name
-        sendTextMessage(chat, "Введите имя или фамилию длиной до $maxLength символов.")
+        sendDialogText(chat, "Введите имя или фамилию длиной до $maxLength символов.")
     }
 }
 
@@ -90,7 +88,7 @@ private suspend fun BehaviourContext.collectProfile(
     chat: Chat, userId: Long, initial: ClientProfile, goals: List<String>,
 ): ProfileDraft {
     var profile = initial
-    var measurement = MeasurementInput(LocalDate.now())
+    var measurement = MeasurementInput(dialogToday())
     val metrics = listOf(Metric.WEIGHT, Metric.HEIGHT)
     val menu = dialogKeyboard(*(metrics.map { it.label } + ProfileField.entries.filter { it != ProfileField.GOAL || goals.isNotEmpty() }.map { it.label } + SAVE).toTypedArray())
     while (true) {
@@ -116,12 +114,12 @@ private suspend fun BehaviourContext.collectProfile(
             ProfileField.AGE -> "Сколько полных лет подопечному?"
             else -> field.label
         }
-        sendTextMessage(chat, prompt, replyMarkup = dialogKeyboard(*actions.toTypedArray()))
+        sendDialogText(chat, prompt, replyMarkup = dialogKeyboard(*actions.toTypedArray()))
         while (true) {
             val raw = awaitText(userId)
             if (raw == SKIP) break
             if (required && (raw.isBlank() || raw == CLEAR || raw == "-")) {
-                sendTextMessage(chat, "Поле обязательно. Введите значение или нажмите «Пропустить».")
+                sendDialogText(chat, "Поле обязательно. Введите значение или нажмите «Пропустить».")
                 continue
             }
             val value = if (raw == CLEAR) null else raw
@@ -130,7 +128,7 @@ private suspend fun BehaviourContext.collectProfile(
                 profile = validateProfile(field.apply(profile, value))
                 break
             } catch (e: ValidationException) {
-                sendTextMessage(chat, e.message.orEmpty())
+                sendDialogText(chat, e.message.orEmpty())
             }
         }
     }
@@ -141,7 +139,7 @@ private suspend fun BehaviourContext.readProfileMeasurement(
 ): MeasurementInput {
     val reset = "Сбросить ввод"
     val keyboard = if (metric.read(draft) == null) dialogKeyboard(SKIP) else dialogKeyboard(SKIP, reset)
-    sendTextMessage(chat, "${metric.label} · введите значение для замера за сегодня.", replyMarkup = keyboard)
+    sendDialogText(chat, "${metric.label} · введите значение для замера за сегодня.", replyMarkup = keyboard)
     while (true) {
         val raw = awaitText(userId)
         if (raw == SKIP) return draft
@@ -150,7 +148,7 @@ private suspend fun BehaviourContext.readProfileMeasurement(
             val value = Parsing.decimalOrNull(raw) ?: throw ValidationException("Введите число.")
             return metric.write(draft, value).also(::validateMeasurement)
         } catch (e: ValidationException) {
-            sendTextMessage(chat, e.message.orEmpty())
+            sendDialogText(chat, e.message.orEmpty())
         }
     }
 }

@@ -6,7 +6,6 @@ import com.tc.gymtrainer.bot.platform.TrainingPlatform
 import dev.inmo.tgbotapi.extensions.api.bot.getMe
 import com.tc.gymtrainer.bot.platform.ValidationException
 import dev.inmo.tgbotapi.extensions.behaviour_builder.BehaviourContext
-import dev.inmo.tgbotapi.extensions.api.send.sendTextMessage
 import dev.inmo.tgbotapi.extensions.behaviour_builder.triggers_handling.onCommand
 import dev.inmo.tgbotapi.extensions.behaviour_builder.triggers_handling.onText
 import dev.inmo.tgbotapi.extensions.behaviour_builder.triggers_handling.onMessageDataCallbackQuery
@@ -64,38 +63,14 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
             val sender = message.privateSenderId ?: return@onCommand
             runFlow(message.chat) {
                 dialogs.remove(sender)?.cancelAndJoin()
-                val token = message.commandArgument()
-                val trainer = if (token != null) platform.trainers.connectTrainingBot(token, sender)
-                    else requireTrainer(message.chat, sender, trainerService) ?: return@runFlow
-                val greeting = if (token != null) "Бот для тренировок подключён к профилю ${trainer.username ?: trainer.fullName}."
-                    else "С возвращением, ${trainer.fullName}! Ваш логин: ${trainer.username ?: trainer.fullName}."
-                sendTextMessage(message.chat, "$greeting\n\nВыберите действие.", replyMarkup = trainingKeyboard)
+                welcome(message.chat, sender, message.commandArgument())
             }
         }
         bc.onText(initialFilter = { TrainingAction.from(it.content.text, username) != null }, markerFactory = null) { message ->
             val sender = message.privateSenderId ?: return@onText
             val action = TrainingAction.from(message.content.text, username) ?: return@onText
             trainerDialog(message.chat, sender) { trainer ->
-                when (action) {
-                    TrainingAction.ADD_CLIENT -> addClient(message.chat, sender, trainer, clientService)
-                    TrainingAction.EXERCISES -> showExerciseGroups(message.chat, trainer.telegramUserId, catalogService)
-                    TrainingAction.CLIENTS -> showClients(message.chat, trainer, clientService)
-                    TrainingAction.WORKOUT -> {
-                        val client = selectClient(message.chat, sender, trainer, clientService, "Для кого записываем тренировку?") ?: return@trainerDialog
-                        recordWorkout(message.chat, sender, trainer.telegramUserId, client, catalogService, workoutService)
-                    }
-                    TrainingAction.HISTORY -> {
-                        val client = selectClient(message.chat, sender, trainer, clientService, "Чью историю показать?", includeArchived = true) ?: return@trainerDialog
-                        showWorkoutHistory(message.chat, trainer.telegramUserId, client, workoutService)
-                    }
-                    TrainingAction.MEASURE -> {
-                        val client = selectClient(message.chat, sender, trainer, clientService, "Чьи замеры?", includeArchived = true) ?: return@trainerDialog
-                        showMeasurementHistory(message.chat, trainer.telegramUserId, client, measurementService)
-                    }
-                    TrainingAction.HELP -> sendTextMessage(message.chat, entities = trainingHelp, replyMarkup = trainingKeyboard)
-                    TrainingAction.MENU -> sendTextMessage(message.chat, "Выберите действие.", replyMarkup = trainingKeyboard)
-                    TrainingAction.CANCEL -> sendTextMessage(message.chat, "Отменено.", replyMarkup = trainingKeyboard)
-                }
+                handleAction(message.chat, sender, trainer, action)
             }
         }
 
@@ -109,7 +84,38 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
         }
     }
 
-    private suspend fun BehaviourContext.handleMenu(chat: Chat, sender: Long, trainer: Trainer, data: String) {
+    internal suspend fun BehaviourContext.welcome(chat: Chat, sender: Long, token: String?) {
+        val trainer = if (token != null) platform.trainers.connectTrainingBot(token, sender)
+            else requireTrainer(chat, sender, trainerService) ?: return
+        val greeting = if (token != null) "Бот для тренировок подключён к профилю ${trainer.username ?: trainer.fullName}."
+            else "С возвращением, ${trainer.fullName}! Ваш логин: ${trainer.username ?: trainer.fullName}."
+        sendDialogText(chat, "$greeting\n\nВыберите действие.", replyMarkup = trainingKeyboard)
+    }
+
+    internal suspend fun BehaviourContext.handleAction(chat: Chat, sender: Long, trainer: Trainer, action: TrainingAction) {
+        when (action) {
+            TrainingAction.ADD_CLIENT -> addClient(chat, sender, trainer, clientService)
+            TrainingAction.EXERCISES -> showExerciseGroups(chat, trainer.telegramUserId, catalogService)
+            TrainingAction.CLIENTS -> showClients(chat, trainer, clientService)
+            TrainingAction.WORKOUT -> {
+                val client = selectClient(chat, sender, trainer, clientService, "Для кого записываем тренировку?") ?: return
+                recordWorkout(chat, sender, trainer.telegramUserId, client, catalogService, workoutService)
+            }
+            TrainingAction.HISTORY -> {
+                val client = selectClient(chat, sender, trainer, clientService, "Чью историю показать?", includeArchived = true) ?: return
+                showWorkoutHistory(chat, trainer.telegramUserId, client, workoutService)
+            }
+            TrainingAction.MEASURE -> {
+                val client = selectClient(chat, sender, trainer, clientService, "Чьи замеры?", includeArchived = true) ?: return
+                showMeasurementHistory(chat, trainer.telegramUserId, client, measurementService)
+            }
+            TrainingAction.HELP -> sendDialogText(chat, entities = trainingHelp, replyMarkup = trainingKeyboard)
+            TrainingAction.MENU -> sendDialogText(chat, "Выберите действие.", replyMarkup = trainingKeyboard)
+            TrainingAction.CANCEL -> sendDialogText(chat, "Отменено.", replyMarkup = trainingKeyboard)
+        }
+    }
+
+    internal suspend fun BehaviourContext.handleMenu(chat: Chat, sender: Long, trainer: Trainer, data: String) {
         val parts = data.split(':')
         val action = parts.take(2).joinToString(":")
         fun id(index: Int = 2) = parts.getOrNull(index)?.toLongOrNull() ?: throw ValidationException("Некорректная запись.")
@@ -159,13 +165,13 @@ class GymTrainerBot(private val platform: TrainingPlatform) {
                 else showMeasurementHistory(chat, trainer.telegramUserId, client, measurementService, page(3))
             }
             "m:view" -> showMeasurement(chat, sender, trainer, id(), clientService, measurementService)
-            "m:close" -> sendTextMessage(chat, "Главное меню", replyMarkup = trainingKeyboard)
+            "m:close" -> sendDialogText(chat, "Главное меню", replyMarkup = trainingKeyboard)
         }
     }
 }
 
 // Telegram keeps the original keyboard on messages sent before the workout menu changed.
-private fun MessageDataCallbackQuery.menuDestination(): String {
+internal fun MessageDataCallbackQuery.menuDestination(): String {
     val keyboard = (message as? PossiblyMarkedUp)?.replyMarkup?.keyboard ?: return data
     val buttons = keyboard.flatten().filterIsInstance<CallbackDataInlineKeyboardButton>()
     val oldClose = buttons.firstOrNull { it.text == CLOSE_WORKOUT } ?: return data

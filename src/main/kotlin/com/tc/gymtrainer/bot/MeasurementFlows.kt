@@ -6,7 +6,6 @@ import com.tc.gymtrainer.bot.platform.ClientService
 import com.tc.gymtrainer.bot.platform.MeasurementInput
 import com.tc.gymtrainer.bot.platform.MeasurementService
 import com.tc.gymtrainer.bot.platform.Trainer
-import dev.inmo.tgbotapi.extensions.api.send.sendTextMessage
 import dev.inmo.tgbotapi.extensions.behaviour_builder.BehaviourContext
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.dataButton
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.inlineKeyboard
@@ -17,13 +16,12 @@ import dev.inmo.tgbotapi.utils.row
 import com.tc.gymtrainer.bot.platform.validateMeasurement
 import com.tc.gymtrainer.bot.platform.ValidationException
 import java.math.BigDecimal
-import java.time.LocalDate
 
 /** Замеры тела: добавление, история, редактирование, удаление. */
 internal suspend fun BehaviourContext.addMeasurement(
     chat: Chat, userId: Long, senderId: Long, client: Client, measurements: MeasurementService,
 ) {
-    val input = collectMeasurement(chat, userId, MeasurementInput(LocalDate.now()), client.fullName)
+    val input = collectMeasurement(chat, userId, MeasurementInput(dialogToday()), client.fullName)
     val saved = measurements.add(senderId, client.id, input)
     sendCard(chat, "✅ Замер сохранён.\n\n${client.fullName}\n${Format.measurementCard(saved)}", replyMarkup = trainingKeyboard)
 }
@@ -56,24 +54,24 @@ internal suspend fun BehaviourContext.showMeasurement(
             row { dataButton("✅ Готово", "me:done") }
         },
     )
-    when (awaitCallbackData(userId, editPrompt.messageId)) {
+    when (awaitCallbackData(userId, editPrompt)) {
         "me:edit" -> {
             val input = collectMeasurement(chat, userId, measurement.toInput(), client.fullName)
             val updated = measurements.update(senderId, id, input, expected = measurement)
             sendCard(chat, "✅ Обновлено.\n\n${Format.measurementCard(updated)}", replyMarkup = trainingKeyboard)
         }
         "me:del" -> {
-            val confirm = sendTextMessage(chat, "Удалить замер за ${Format.date(measurement.measuredOn)}?",
+            val confirm = sendDialogText(chat, "Удалить замер за ${Format.date(measurement.measuredOn)}?",
                 replyMarkup = inlineKeyboard {
                     row { dataButton("Удалить замер", "me:confirm") }
                     row { dataButton("Отмена", "cancel") }
                 })
-            if (awaitCallbackData(userId, confirm.messageId) == "me:confirm") {
+            if (awaitCallbackData(userId, confirm) == "me:confirm") {
                 measurements.delete(senderId, id)
-                sendTextMessage(chat, "Замер удалён.", replyMarkup = trainingKeyboard)
+                sendDialogText(chat, "Замер удалён.", replyMarkup = trainingKeyboard)
             }
         }
-        else -> sendTextMessage(chat, "Готово.", replyMarkup = trainingKeyboard)
+        else -> sendDialogText(chat, "Готово.", replyMarkup = trainingKeyboard)
     }
 }
 
@@ -134,7 +132,7 @@ private suspend fun BehaviourContext.collectMeasurement(
                 validateMeasurement(draft)
                 return draft
             } catch (e: ValidationException) {
-                sendTextMessage(chat, e.message.orEmpty())
+                sendDialogText(chat, e.message.orEmpty())
                 continue
             }
         }
@@ -146,7 +144,7 @@ private suspend fun BehaviourContext.collectMeasurement(
             metric == Metric.BACK_WIDTH -> "Введите ширину спины в сантиметрах. При свободно опущенных руках измерьте расстояние по лопаткам между задними краями подмышек."
             else -> "Введите значение · $action"
         }
-        sendTextMessage(chat, prompt, replyMarkup = keyboard)
+        sendDialogText(chat, prompt, replyMarkup = keyboard)
         while (true) {
             val raw = awaitText(userId)
             if (raw == SKIP) break
@@ -157,13 +155,13 @@ private suspend fun BehaviourContext.collectMeasurement(
                             ?: throw ValidationException("Введите число, например 72,5.")
                         metric.write(draft, value).also { if (value != null) validateMeasurement(it) }
                     }
-                    action == "Дата" -> draft.copy(measuredOn = Parsing.dateOrNull(raw, LocalDate.now())
+                    action == "Дата" -> draft.copy(measuredOn = Parsing.dateOrNull(raw, dialogToday())
                         ?: throw ValidationException("Введите существующую дату в формате ДД.ММ.ГГГГ."))
                     else -> draft.copy(note = if (raw == CLEAR) null else raw)
                 }
                 break
             } catch (e: ValidationException) {
-                sendTextMessage(chat, e.message.orEmpty())
+                sendDialogText(chat, e.message.orEmpty())
             }
         }
     }

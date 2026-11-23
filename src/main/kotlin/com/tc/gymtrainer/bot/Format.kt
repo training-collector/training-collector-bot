@@ -8,7 +8,6 @@ import com.tc.gymtrainer.bot.platform.WorkoutDetail
 import com.tc.gymtrainer.bot.platform.WorkoutSession
 import java.math.BigDecimal
 import java.time.LocalDate
-import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
 /**
@@ -18,7 +17,6 @@ object Format {
     private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 
     fun date(value: LocalDate): String = value.format(dateFmt)
-    fun date(value: OffsetDateTime): String = value.format(dateFmt)
 
     /** Число без лишних нулей: 60.00 → «60», 62.50 → «62.5». */
     fun number(value: BigDecimal?): String? =
@@ -45,16 +43,16 @@ object Format {
         p.notes?.let { appendLine("Заметки: $it") }
     }.trimEnd()
 
-    /** Заголовок тренировки для списков истории. */
-    fun sessionLine(session: WorkoutSession): String {
+    /** Заголовок тренировки для списков истории. [date] — дата в поясе тренера. */
+    fun sessionLine(session: WorkoutSession, date: String): String {
         val duration = session.durationMin?.let { ", ${it} мин" } ?: ""
-        return "🗓 ${date(session.performedAt)}$duration"
+        return "🗓 $date$duration"
     }
 
-    /** Полная тренировка: упражнения и подходы. */
-    fun workoutDetail(detail: WorkoutDetail): String = buildString {
+    /** Полная тренировка: упражнения и подходы. [date] — дата в поясе тренера. */
+    fun workoutDetail(detail: WorkoutDetail, date: String): String = buildString {
         val s = detail.session
-        appendLine("🗓 Тренировка ${date(s.performedAt)}")
+        appendLine("🗓 Тренировка $date")
         s.durationMin?.let { appendLine("🕒 Длительность: $it мин") }
         if (!s.note.isNullOrBlank()) appendLine("📝 ${s.note}")
         if (detail.exercises.isEmpty()) {

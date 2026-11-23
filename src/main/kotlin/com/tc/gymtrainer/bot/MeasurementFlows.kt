@@ -2,51 +2,38 @@ package com.tc.gymtrainer.bot
 
 import com.tc.gymtrainer.bot.platform.BodyMeasurement
 import com.tc.gymtrainer.bot.platform.Client
-import com.tc.gymtrainer.bot.platform.ClientService
 import com.tc.gymtrainer.bot.platform.MeasurementInput
-import com.tc.gymtrainer.bot.platform.MeasurementService
-import com.tc.gymtrainer.bot.platform.Trainer
-import dev.inmo.tgbotapi.extensions.behaviour_builder.BehaviourContext
+import com.tc.gymtrainer.bot.platform.ValidationException
+import com.tc.gymtrainer.bot.platform.validateMeasurement
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.dataButton
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.inlineKeyboard
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.replyKeyboard
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.simpleButton
-import dev.inmo.tgbotapi.types.chat.Chat
 import dev.inmo.tgbotapi.utils.row
-import com.tc.gymtrainer.bot.platform.validateMeasurement
-import com.tc.gymtrainer.bot.platform.ValidationException
 import java.math.BigDecimal
 
 /** Замеры тела: добавление, история, редактирование, удаление. */
-internal suspend fun BehaviourContext.addMeasurement(
-    chat: Chat, userId: Long, senderId: Long, client: Client, measurements: MeasurementService,
-) {
-    val input = collectMeasurement(chat, userId, MeasurementInput(dialogToday()), client.fullName)
-    val saved = measurements.add(senderId, client.id, input)
-    sendCard(chat, "✅ Замер сохранён.\n\n${client.fullName}\n${Format.measurementCard(saved)}", replyMarkup = trainingKeyboard)
+internal suspend fun Dialog.addMeasurement(client: Client) {
+    val input = collectMeasurement(MeasurementInput(today), client.fullName)
+    val saved = api.addMeasurement(client.id, input)
+    sendCard("✅ Замер сохранён.\n\n${client.fullName}\n${Format.measurementCard(saved)}", replyMarkup = trainingKeyboard)
 }
 
-internal suspend fun BehaviourContext.showMeasurementHistory(
-    chat: Chat, senderId: Long, client: Client, measurements: MeasurementService, page: Int = 0,
-) {
-    val history = measurements.history(senderId, client.id)
+internal suspend fun Dialog.showMeasurementHistory(client: Client, page: Int = 0) {
+    val history = api.measurements(client.id)
     val items = history.map { m ->
         val weight = Format.number(m.weightKg)?.let { " · $it кг" }.orEmpty()
         "${Format.date(m.measuredOn)}$weight" to "m:view:${m.id}"
     }
     val title = if (history.isEmpty()) "${client.fullName} · замеров пока нет." else "История замеров · ${client.fullName}"
-    sendListPage(chat, title, items, listOf("Добавить новый замер" to "m:add:${client.id}"), page,
+    sendListPage(title, items, listOf("➕ Добавить новый замер" to "m:add:${client.id}"), page,
         BACK_TO_CLIENT to "cl:view:${client.id}") { "m:hist:${client.id}:$it" }
 }
 
-internal suspend fun BehaviourContext.showMeasurement(
-    chat: Chat, userId: Long, trainer: Trainer, id: Long, clients: ClientService, measurements: MeasurementService,
-) {
-    val senderId = trainer.telegramUserId
-    val measurement = measurements.get(senderId, id)
-    val client = clients.getOwned(senderId, measurement.clientId)
+internal suspend fun Dialog.showMeasurement(id: Long) {
+    val measurement = api.measurement(id)
+    val client = api.client(measurement.clientId)
     val editPrompt = sendCard(
-        chat,
         Format.measurementCard(measurement),
         replyMarkup = inlineKeyboard {
             row { dataButton("✏️ Изменить", "me:edit") }
@@ -54,24 +41,24 @@ internal suspend fun BehaviourContext.showMeasurement(
             row { dataButton("✅ Готово", "me:done") }
         },
     )
-    when (awaitCallbackData(userId, editPrompt)) {
+    when (awaitCallback(editPrompt)) {
         "me:edit" -> {
-            val input = collectMeasurement(chat, userId, measurement.toInput(), client.fullName)
-            val updated = measurements.update(senderId, id, input, expected = measurement)
-            sendCard(chat, "✅ Обновлено.\n\n${Format.measurementCard(updated)}", replyMarkup = trainingKeyboard)
+            val input = collectMeasurement(measurement.toInput(), client.fullName)
+            val updated = api.updateMeasurement(measurement, input)
+            sendCard("✅ Обновлено.\n\n${Format.measurementCard(updated)}", replyMarkup = trainingKeyboard)
         }
         "me:del" -> {
-            val confirm = sendDialogText(chat, "Удалить замер за ${Format.date(measurement.measuredOn)}?",
+            val confirm = send("Удалить замер за ${Format.date(measurement.measuredOn)}?",
                 replyMarkup = inlineKeyboard {
                     row { dataButton("Удалить замер", "me:confirm") }
                     row { dataButton("Отмена", "cancel") }
                 })
-            if (awaitCallbackData(userId, confirm) == "me:confirm") {
-                measurements.delete(senderId, id)
-                sendDialogText(chat, "Замер удалён.", replyMarkup = trainingKeyboard)
+            if (awaitCallback(confirm) == "me:confirm") {
+                api.deleteMeasurement(id)
+                send("Замер удалён.", replyMarkup = trainingKeyboard)
             }
         }
-        else -> sendDialogText(chat, "Готово.", replyMarkup = trainingKeyboard)
+        else -> send("Готово.", replyMarkup = trainingKeyboard)
     }
 }
 
@@ -106,9 +93,7 @@ internal enum class Metric(val label: String, val read: (MeasurementInput) -> Bi
     CALF("Обхват голени без стороны, см", { it.calfCm }, { m, v -> m.copy(calfCm = v) })
 }
 
-private suspend fun BehaviourContext.collectMeasurement(
-    chat: Chat, userId: Long, initial: MeasurementInput, clientName: String,
-): MeasurementInput {
+private suspend fun Dialog.collectMeasurement(initial: MeasurementInput, clientName: String): MeasurementInput {
     var draft = initial
     val fields = Metric.entries.filter { it !in setOf(Metric.ARM, Metric.THIGH, Metric.CALF) || it.read(initial) != null }
     val menu = replyKeyboard(resizeKeyboard = true) {
@@ -125,14 +110,14 @@ private suspend fun BehaviourContext.collectMeasurement(
             draft.note?.let { appendLine("Заметка: $it") }
             append("Выберите показатель или нажмите «Сохранить».")
         }
-        sendCard(chat, summary, replyMarkup = menu)
-        val action = awaitText(userId)
+        sendCard(summary, replyMarkup = menu)
+        val action = awaitText()
         if (action == SAVE) {
             try {
                 validateMeasurement(draft)
                 return draft
             } catch (e: ValidationException) {
-                sendDialogText(chat, e.message.orEmpty())
+                send(e.message.orEmpty())
                 continue
             }
         }
@@ -144,9 +129,9 @@ private suspend fun BehaviourContext.collectMeasurement(
             metric == Metric.BACK_WIDTH -> "Введите ширину спины в сантиметрах. При свободно опущенных руках измерьте расстояние по лопаткам между задними краями подмышек."
             else -> "Введите значение · $action"
         }
-        sendDialogText(chat, prompt, replyMarkup = keyboard)
+        send(prompt, replyMarkup = keyboard)
         while (true) {
-            val raw = awaitText(userId)
+            val raw = awaitText()
             if (raw == SKIP) break
             try {
                 draft = when {
@@ -155,13 +140,13 @@ private suspend fun BehaviourContext.collectMeasurement(
                             ?: throw ValidationException("Введите число, например 72,5.")
                         metric.write(draft, value).also { if (value != null) validateMeasurement(it) }
                     }
-                    action == "Дата" -> draft.copy(measuredOn = Parsing.dateOrNull(raw, dialogToday())
+                    action == "Дата" -> draft.copy(measuredOn = Parsing.dateOrNull(raw, today)
                         ?: throw ValidationException("Введите существующую дату в формате ДД.ММ.ГГГГ."))
                     else -> draft.copy(note = if (raw == CLEAR) null else raw)
                 }
                 break
             } catch (e: ValidationException) {
-                sendDialogText(chat, e.message.orEmpty())
+                send(e.message.orEmpty())
             }
         }
     }

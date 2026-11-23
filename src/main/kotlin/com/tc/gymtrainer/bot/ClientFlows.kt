@@ -1,65 +1,51 @@
 package com.tc.gymtrainer.bot
 
-import com.tc.gymtrainer.bot.platform.validateProfile
-import com.tc.gymtrainer.bot.platform.ClientProfile
 import com.tc.gymtrainer.bot.platform.Client
+import com.tc.gymtrainer.bot.platform.ClientProfile
+import com.tc.gymtrainer.bot.platform.MeasurementInput
 import com.tc.gymtrainer.bot.platform.Sex
 import com.tc.gymtrainer.bot.platform.ValidationException
-import com.tc.gymtrainer.bot.platform.ClientService
-import com.tc.gymtrainer.bot.platform.MeasurementInput
-import com.tc.gymtrainer.bot.platform.MeasurementService
-import com.tc.gymtrainer.bot.platform.WorkoutService
 import com.tc.gymtrainer.bot.platform.validateMeasurement
-import com.tc.gymtrainer.bot.platform.Trainer
-import dev.inmo.tgbotapi.extensions.behaviour_builder.BehaviourContext
+import com.tc.gymtrainer.bot.platform.validateProfile
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.dataButton
 import dev.inmo.tgbotapi.extensions.utils.types.buttons.inlineKeyboard
-import dev.inmo.tgbotapi.types.chat.Chat
 import dev.inmo.tgbotapi.utils.row
 
 /** Создание подопечного и открытие его журнала. */
-internal suspend fun BehaviourContext.addClient(
-    chat: Chat,
-    userId: Long,
-    trainer: Trainer,
-    clients: ClientService,
-) {
-    val first = askName(chat, userId, "Имя нового подопечного", 253)
-    val last = askName(chat, userId, "Фамилия подопечного", 254 - first.length)
+internal suspend fun Dialog.addClient() {
+    val first = askName("Имя нового подопечного", 253)
+    val last = askName("Фамилия подопечного", 254 - first.length)
     val initial = ClientProfile(first, last)
-    val action = chooseReply(chat, userId, "${Format.profile(initial)}\nСохранить подопечного или заполнить дополнительные данные?", SAVE, "Редактировать")
-    val draft = if (action == SAVE) ProfileDraft(initial) else collectProfile(chat, userId, initial, clients.goals(trainer.telegramUserId))
-    val client = clients.create(trainer.telegramUserId, draft.profile, draft.measurement)
+    val action = chooseReply("${Format.profile(initial)}\nСохранить подопечного или заполнить дополнительные данные?", SAVE, "Редактировать")
+    val draft = if (action == SAVE) ProfileDraft(initial) else collectProfile(initial, api.goals())
+    val client = api.createClient(draft.profile, draft.measurement)
     val card = Format.clientCard(client, draft.measurement?.weightKg, draft.measurement?.heightCm)
-    sendDialogText(chat, "Подопечный добавлен.", replyMarkup = trainingKeyboard)
-    sendCard(chat, card, replyMarkup = clientActionsKeyboard(client.id))
+    send("Подопечный добавлен.", replyMarkup = trainingKeyboard)
+    sendCard(card, replyMarkup = clientActionsKeyboard(client.id))
 }
 
-internal suspend fun BehaviourContext.showClients(
-    chat: Chat, trainer: Trainer, clients: ClientService, page: Int = 0,
-) {
-    val list = clients.list(trainer.telegramUserId, includeArchived = true)
+internal suspend fun Dialog.showClients(page: Int = 0) {
+    val list = api.clients(includeArchived = true)
     val title = if (list.isEmpty()) "У вас пока нет подопечных." else "Ваши подопечные"
-    sendListPage(chat, title, list.map { Format.clientLine(it) to "cl:view:${it.id}" },
-        listOf("➕ ${TrainingAction.ADD_CLIENT.label}" to "cl:add"), page) { "cl:page:$it" }
+    // The add button goes under the list, after the page switch.
+    sendListPage(title, list.map { Format.clientLine(it) to "cl:view:${it.id}" }, emptyList(), page,
+        "➕ ${TrainingAction.ADD_CLIENT.label}" to "cl:add") { "cl:page:$it" }
 }
 
-internal suspend fun BehaviourContext.showClientCard(
-    chat: Chat, senderId: Long, client: Client, measurements: MeasurementService, workouts: WorkoutService,
-) {
-    val current = measurements.current(senderId, client.id)
+internal suspend fun Dialog.showClientCard(client: Client) {
+    val current = api.currentMeasurements(client.id)
     val card = Format.clientCard(client, current["weightKg"]?.value, current["heightCm"]?.value)
-    val active = workouts.activeForClient(senderId, client.id)
-    sendCard(chat, if (active == null) card else "$card\n\nИдёт тренировка от ${Format.date(active.performedAt)}.",
+    val active = api.activeWorkout(client.id)
+    sendCard(if (active == null) card else "$card\n\nИдёт тренировка от ${date(active.performedAt)}.",
         replyMarkup = clientActionsKeyboard(client.id))
 }
 
-private suspend fun BehaviourContext.askName(chat: Chat, userId: Long, prompt: String, maxLength: Int): String {
-    sendDialogText(chat, prompt, replyMarkup = dialogKeyboard())
+private suspend fun Dialog.askName(prompt: String, maxLength: Int): String {
+    send(prompt, replyMarkup = dialogKeyboard())
     while (true) {
-        val name = awaitText(userId)
+        val name = awaitText()
         if (name !in listOf("-", SKIP, CLEAR) && name.length in 1..maxLength) return name
-        sendDialogText(chat, "Введите имя или фамилию длиной до $maxLength символов.")
+        send("Введите имя или фамилию длиной до $maxLength символов.")
     }
 }
 
@@ -84,21 +70,19 @@ private data class ProfileDraft(
     val measurement: MeasurementInput? = null,
 )
 
-private suspend fun BehaviourContext.collectProfile(
-    chat: Chat, userId: Long, initial: ClientProfile, goals: List<String>,
-): ProfileDraft {
+private suspend fun Dialog.collectProfile(initial: ClientProfile, goals: List<String>): ProfileDraft {
     var profile = initial
-    var measurement = MeasurementInput(dialogToday())
+    var measurement = MeasurementInput(today)
     val metrics = listOf(Metric.WEIGHT, Metric.HEIGHT)
     val menu = dialogKeyboard(*(metrics.map { it.label } + ProfileField.entries.filter { it != ProfileField.GOAL || goals.isNotEmpty() }.map { it.label } + SAVE).toTypedArray())
     while (true) {
         val card = Format.profile(profile, measurement.weightKg, measurement.heightCm)
-        sendCard(chat, "$card\n\nВыберите поле или нажмите «Сохранить».", replyMarkup = menu)
-        val action = awaitText(userId)
+        sendCard("$card\n\nВыберите поле или нажмите «Сохранить».", replyMarkup = menu)
+        val action = awaitText()
         if (action == SAVE) return ProfileDraft(profile, measurement.takeIf { it.weightKg != null || it.heightCm != null })
         val metric = metrics.find { it.label == action }
         if (metric != null) {
-            measurement = readProfileMeasurement(chat, userId, metric, measurement)
+            measurement = readProfileMeasurement(metric, measurement)
             continue
         }
         val field = ProfileField.entries.find { it.label == action } ?: continue
@@ -114,12 +98,12 @@ private suspend fun BehaviourContext.collectProfile(
             ProfileField.AGE -> "Сколько полных лет подопечному?"
             else -> field.label
         }
-        sendDialogText(chat, prompt, replyMarkup = dialogKeyboard(*actions.toTypedArray()))
+        send(prompt, replyMarkup = dialogKeyboard(*actions.toTypedArray()))
         while (true) {
-            val raw = awaitText(userId)
+            val raw = awaitText()
             if (raw == SKIP) break
             if (required && (raw.isBlank() || raw == CLEAR || raw == "-")) {
-                sendDialogText(chat, "Поле обязательно. Введите значение или нажмите «Пропустить».")
+                send("Поле обязательно. Введите значение или нажмите «Пропустить».")
                 continue
             }
             val value = if (raw == CLEAR) null else raw
@@ -128,27 +112,25 @@ private suspend fun BehaviourContext.collectProfile(
                 profile = validateProfile(field.apply(profile, value))
                 break
             } catch (e: ValidationException) {
-                sendDialogText(chat, e.message.orEmpty())
+                send(e.message.orEmpty())
             }
         }
     }
 }
 
-private suspend fun BehaviourContext.readProfileMeasurement(
-    chat: Chat, userId: Long, metric: Metric, draft: MeasurementInput,
-): MeasurementInput {
+private suspend fun Dialog.readProfileMeasurement(metric: Metric, draft: MeasurementInput): MeasurementInput {
     val reset = "Сбросить ввод"
     val keyboard = if (metric.read(draft) == null) dialogKeyboard(SKIP) else dialogKeyboard(SKIP, reset)
-    sendDialogText(chat, "${metric.label} · введите значение для замера за сегодня.", replyMarkup = keyboard)
+    send("${metric.label} · введите значение для замера за сегодня.", replyMarkup = keyboard)
     while (true) {
-        val raw = awaitText(userId)
+        val raw = awaitText()
         if (raw == SKIP) return draft
         if (raw == reset) return metric.write(draft, null)
         try {
             val value = Parsing.decimalOrNull(raw) ?: throw ValidationException("Введите число.")
             return metric.write(draft, value).also(::validateMeasurement)
         } catch (e: ValidationException) {
-            sendDialogText(chat, e.message.orEmpty())
+            send(e.message.orEmpty())
         }
     }
 }

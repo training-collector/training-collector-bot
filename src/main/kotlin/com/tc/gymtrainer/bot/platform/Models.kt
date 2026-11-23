@@ -4,22 +4,25 @@ import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
 
+// Only the fields the bot reads. The platform may send more; they are ignored.
+
 data class Trainer(
     val id: Long,
-    val telegramUserId: Long,
     val fullName: String,
     val username: String?,
+    val timeZone: String? = null,
 )
+
+enum class ClientStatus(val label: String) { ACTIVE("Активен"), ARCHIVED("В архиве") }
+
+enum class Sex(val label: String) { MALE("Мужской"), FEMALE("Женский") }
 
 data class Client(
     val id: Long,
-    val trainerId: Long,
     val fullName: String,
     val goal: String?,
     val notes: String?,
     val status: ClientStatus,
-    val createdAt: OffsetDateTime,
-    val updatedAt: OffsetDateTime,
     val firstName: String,
     val lastName: String?,
     val sex: Sex?,
@@ -28,8 +31,6 @@ data class Client(
 ) {
     fun profile() = ClientProfile(firstName, lastName, sex, age, telegramUsername, goal, notes)
 }
-
-enum class Sex(val label: String) { MALE("Мужской"), FEMALE("Женский") }
 
 data class ClientProfile(
     val firstName: String,
@@ -40,7 +41,6 @@ data class ClientProfile(
     val goal: String? = null,
     val notes: String? = null,
 ) {
-    @get:com.fasterxml.jackson.annotation.JsonIgnore
     val fullName: String get() = listOfNotNull(firstName, lastName).joinToString(" ")
 }
 
@@ -53,33 +53,21 @@ data class ExerciseCatalogItem(
     val description: String? = null,
 )
 
-enum class WorkoutStage { CHOOSE_TEMPLATE, CHOOSE_EXERCISE, ENTER_SETS, REVIEW, COMPLETED }
+enum class WorkoutStage { CHOOSE_EXERCISE, ENTER_SETS, REVIEW, COMPLETED }
 
 data class WorkoutSession(
     val id: Long,
     val clientId: Long,
-    val trainerId: Long,
     val performedAt: OffsetDateTime,
     val durationMin: Int?,
     val note: String?,
-    val createdAt: OffsetDateTime,
-    val updatedAt: OffsetDateTime,
     val stage: WorkoutStage = WorkoutStage.COMPLETED,
 )
 
-data class WorkoutExercise(
-    val id: Long,
-    val sessionId: Long,
-    val muscleGroupId: Long?,
-    val exerciseCatalogId: Long?,
-    val exerciseName: String,
-    val orderIndex: Int,
-    val note: String?,
-)
+data class WorkoutExercise(val id: Long, val exerciseName: String, val note: String?)
 
 data class ExerciseSet(
     val id: Long,
-    val exerciseId: Long,
     val setNumber: Int,
     val weightKg: BigDecimal?,
     val reps: Int?,
@@ -100,7 +88,6 @@ data class BodyMeasurement(
     val bicepsCm: BigDecimal?,
     val thighCm: BigDecimal?,
     val note: String?,
-    val createdAt: OffsetDateTime,
     val heightCm: BigDecimal? = null,
     val calfCm: BigDecimal? = null,
     val rightBicepsCm: BigDecimal? = null,
@@ -112,6 +99,7 @@ data class BodyMeasurement(
     val rightForearmCm: BigDecimal? = null,
     val leftForearmCm: BigDecimal? = null,
     val backWidthCm: BigDecimal? = null,
+    val version: Int = 0,
 )
 
 data class ExerciseWithSets(
@@ -133,10 +121,8 @@ data class SetDraft(
 )
 
 data class ExerciseDraft(
-    val muscleGroupId: Long?,
-    val exerciseCatalogId: Long?,
-    val exerciseName: String?,
-    val note: String? = null,
+    val exerciseCatalogId: Long,
+    val exerciseName: String,
     val sets: List<SetDraft> = emptyList(),
 )
 

@@ -40,13 +40,15 @@ fun validateSet(set: SetDraft) {
     }
 }
 
+private val TELEGRAM_USERNAME = Regex("[A-Za-z][A-Za-z0-9_]{0,31}")
+
 fun validateProfile(profile: ClientProfile): ClientProfile {
     val clean = profile.copy(firstName = profile.firstName.trim(), lastName = profile.lastName?.trim()?.ifEmpty { null },
         telegramUsername = profile.telegramUsername?.trim()?.ifEmpty { null }?.removePrefix("@"),
         notes = profile.notes?.trim()?.ifEmpty { null })
     if (clean.firstName.isEmpty() || clean.fullName.length > 255) throw ValidationException("Имя и фамилия вместе должны занимать от 1 до 255 символов.")
     if (clean.age != null && clean.age !in 0..130) throw ValidationException("Введите возраст в полных годах от 0 до 130.")
-    if (clean.telegramUsername != null && !clean.telegramUsername.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,31}"))) {
+    if (clean.telegramUsername != null && !TELEGRAM_USERNAME.matches(clean.telegramUsername)) {
         throw ValidationException("Введите ник Telegram латиницей, например @username.")
     }
     return clean

@@ -76,4 +76,24 @@ class ParsingTest {
         assertEquals(LocalDate.of(2024, 12, 31), Parsing.dateOrNull("31.12.24", today))
         assertNull(Parsing.dateOrNull("не дата", today))
     }
+
+    @Test
+    fun `rejects dates the platform cannot store`() {
+        val today = LocalDate.of(2026, 7, 12)
+        for (raw in listOf("01.01.0101", "01.01.999999999", "31.12.1899", "01.01.2101", "30.02.2026")) {
+            assertNull(Parsing.dateOrNull(raw, today), raw)
+        }
+        assertEquals(LocalDate.of(1900, 1, 1), Parsing.dateOrNull("01.01.1900", today))
+        assertEquals(LocalDate.of(2100, 12, 31), Parsing.dateOrNull("31.12.2100", today))
+    }
+
+    @Test
+    fun `set buttons keep the set readable when the exercise name is long`() {
+        val set = "подход 12: 62.5 кг × 10 (RPE 8, отдых 90с)"
+        assertEquals("Жим · $set", setButtonLabel("Жим", set))
+        val long = setButtonLabel("Разведение гантелей лёжа на наклонной скамье головой вверх", set)
+        assertEquals(true, long.length <= 64)
+        assertEquals(true, long.endsWith("… · $set"))
+        assertEquals(true, long.startsWith("Разведение"))
+    }
 }

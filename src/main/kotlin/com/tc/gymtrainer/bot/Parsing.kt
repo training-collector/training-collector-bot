@@ -19,11 +19,17 @@ object Parsing {
         return s.toBigDecimalOrNull()
     }
 
+    private val earliest = LocalDate.of(1900, 1, 1)
+    private val latest = LocalDate.of(2100, 12, 31)
+
     /**
-     * Дата: «дд.мм.гггг», «дд.мм» (текущий год), «сегодня», «вчера».
-     * [today] задаётся снаружи для тестируемости.
+     * Дата: «дд.мм.гггг», «дд.мм» (текущий год), «сегодня», «вчера». Принимаются
+     * даты с 1900 по 2100 год, как на платформе. [today] задаётся снаружи: это
+     * текущий день в поясе тренера.
      */
-    fun dateOrNull(raw: String, today: LocalDate): LocalDate? {
+    fun dateOrNull(raw: String, today: LocalDate): LocalDate? = parseDate(raw, today)?.takeIf { it in earliest..latest }
+
+    private fun parseDate(raw: String, today: LocalDate): LocalDate? {
         val s = raw.trim().lowercase()
         return when (s) {
             "", "-", "сегодня", "today" -> today
